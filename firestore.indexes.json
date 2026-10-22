@@ -1,0 +1,9 @@
+{
+  "indexes": [
+    { "collectionGroup": "vendas", "queryScope": "COLLECTION",
+      "fields": [ { "fieldPath": "empSlug", "order": "ASCENDING" }, { "fieldPath": "acesso", "arrayConfig": "CONTAINS" } ] },
+    { "collectionGroup": "agendamentos", "queryScope": "COLLECTION",
+      "fields": [ { "fieldPath": "empSlug", "order": "ASCENDING" }, { "fieldPath": "acesso", "arrayConfig": "CONTAINS" } ] }
+  ],
+  "fieldOverrides": []
+}

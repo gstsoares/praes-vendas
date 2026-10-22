@@ -1,0 +1,78 @@
+rules_version = '2';
+// Regras de segurança do Firestore – PRAES Controle de Vendas
+// admin   : administrador do sistema (dono) – tudo + liberar usuários + imposto
+// master  : tudo (usuários novos ficam pendentes até o admin liberar)
+// diretor : vendas/agendamentos dos EMPREENDIMENTOS LIBERADOS para ele
+// gerente : vendas/agendamentos em que ele ou a equipe aparecem (campo "acesso") E dos empreendimentos liberados
+// corretor: só as vendas/agendamentos em que aparece E dos empreendimentos liberados
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function meRef() { return /databases/$(database)/documents/users/$(request.auth.uid); }
+    function me() { return get(meRef()).data; }
+    function active() { return signedIn() && exists(meRef()) && me().ativo == true; }
+    function papel() { return me().papel; }
+    function isDono() { return active() && papel() == 'admin'; }
+    function isMaster() { return active() && papel() in ['admin', 'master']; }
+    function isAdmin() { return active() && papel() in ['admin', 'master', 'diretor']; }
+    function mySlug() { return me().pessoaSlug; }
+
+    // empreendimento liberado para o usuário
+    function empOk(d) { return me().empTodos == true || d.empSlug in me().emps; }
+    // pessoa aparece na venda (corretor, gerente, diretor ou corpo de vendas)
+    function inAcesso(d) { return mySlug() != null && mySlug() != '' && mySlug() in d.acesso; }
+    // pode ver/editar o documento
+    function canSee(d) { return isMaster() || (active() && empOk(d) && (papel() == 'diretor' || inAcesso(d))); }
+
+    // ---------- configuração (primeiro acesso e imposto) ----------
+    match /config/{doc} {
+      allow read: if signedIn();
+      allow create: if (signedIn() && doc == 'app' && !exists(/databases/$(database)/documents/config/app)) || isDono();
+      allow update, delete: if isDono();
+    }
+
+    // ---------- usuários ----------
+    match /users/{uid} {
+      allow read: if active() || (signedIn() && request.auth.uid == uid);
+      allow create: if isDono()
+        // master cria, mas o cadastro nasce PENDENTE (sem acesso) até o administrador liberar
+        || (isMaster() && request.resource.data.ativo == false && request.resource.data.pendente == true && request.resource.data.papel != 'admin')
+        // primeiro acesso do sistema: o primeiro usuário vira administrador
+        || (signedIn() && request.auth.uid == uid &&
+            !exists(/databases/$(database)/documents/config/app) &&
+            existsAfter(/databases/$(database)/documents/config/app) &&
+            request.resource.data.papel == 'admin');
+      allow update: if isDono()
+        // master edita, mas não ativa ninguém nem mexe em administrador
+        || (isMaster() && resource.data.papel != 'admin' && request.resource.data.papel != 'admin' &&
+            (request.resource.data.ativo == false || resource.data.ativo == true) &&
+            !(request.resource.data.ativo == true && resource.data.ativo == false))
+        // o próprio usuário só altera nome e foto
+        || (active() && request.auth.uid == uid &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['nome', 'foto']));
+      allow delete: if isDono() || (isMaster() && resource.data.papel != 'admin' && resource.data.ativo == false);
+    }
+
+    // ---------- cadastros ----------
+    match /pessoas/{id}          { allow read: if active(); allow write: if isAdmin(); }
+    match /empreendimentos/{id}  { allow read: if active(); allow write: if isAdmin(); }
+    match /regras/{id}           { allow read: if active(); allow write: if isAdmin(); }
+
+    // ---------- vendas e agendamentos ----------
+    match /vendas/{id} {
+      allow read: if canSee(resource.data);
+      allow create: if canSee(request.resource.data);
+      // gerente/corretor não alteram financeiro, parcelas nem pagamentos
+      allow update: if canSee(resource.data) && canSee(request.resource.data) &&
+        (isAdmin() || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['parcelas', 'financeiro', 'pagamentos']));
+      allow delete: if isMaster() || (isAdmin() && empOk(resource.data));
+    }
+    match /agendamentos/{id} {
+      allow read: if canSee(resource.data);
+      allow create: if canSee(request.resource.data);
+      allow update: if canSee(resource.data) && canSee(request.resource.data);
+      allow delete: if isMaster() || (isAdmin() && empOk(resource.data));
+    }
+  }
+}
