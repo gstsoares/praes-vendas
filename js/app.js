@@ -43,6 +43,7 @@ function confirmar(msg, ok = 'Confirmar') {
   });
 }
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('on'), 2600); }
+window.addEventListener('unhandledrejection', (e) => { const m = String(e.reason?.code || e.reason?.message || e.reason || ''); console.error(e.reason); toast(/permission/i.test(m) ? 'Sem permissão para salvar isso' : 'Erro ao salvar: ' + m.slice(0, 120)); });
 const store_get = (k, d) => { try { return JSON.parse(localStorage.getItem('praes_ui_' + k)) ?? d; } catch (e) { return d; } };
 const store_set = (k, v) => { try { localStorage.setItem('praes_ui_' + k, JSON.stringify(v)); } catch (e) { } };
 
@@ -86,7 +87,7 @@ function regrasVisiveis() {
   D().empreendimentos.filter(e => empOk({ empreendimento: e.nome })).forEach(e => e.regraPadrao && ids.add(e.regraPadrao));
   return D().regras.filter(r => ids.has(r.id));
 }
-const podeEditar = () => ['master', 'diretor', 'gerente', 'corretor'].includes(store.me?.papel);
+const podeEditar = () => ['admin', 'master', 'diretor', 'gerente', 'corretor'].includes(store.me?.papel);
 
 // ---------- modal ----------
 function openModal(html, cls = '') {
@@ -1046,7 +1047,7 @@ function vLiberacoes(el) {
 // ============================ USUÁRIOS ============================
 function listaEmps() { return [...new Map([...D().empreendimentos.map(e => [slug(e.nome), e.nome]), ...D().vendas.map(v => [slug(v.empreendimento), v.empreendimento])].filter(x => x[0])).entries()].sort((a, b) => a[1].localeCompare(b[1])); }
 function empsTexto(u) {
-  if (u.papel === 'master' || u.empTodos) return '<span class="tag ok">Todos</span>';
+  if (['admin', 'master'].includes(u.papel) || u.empTodos) return '<span class="tag ok">Todos</span>';
   const m = new Map(listaEmps()); const l = (u.emps || []).map(e => m.get(e) || e);
   return l.length ? l.map(x => `<span class="tag">${esc(x)}</span>`).join('') : '<span class="tag bad">Nenhum</span>';
 }
@@ -1085,7 +1086,7 @@ function vUsuarios(el) {
     $('#rmFoto', b) && ($('#rmFoto', b).onclick = () => { u.foto = ''; $('#ph', b).innerHTML = avatar({ nome: u.nome }, 'xl'); });
     $('#bSave', b).onclick = async () => {
       const o = {}; $$('[data-v]', b).forEach(i => o[i.dataset.v] = i.dataset.v === 'ativo' ? i.value === 'true' : i.value.trim());
-      o.empTodos = o.papel === 'master' || $('#empTodos', b).checked;
+      o.empTodos = ['admin', 'master'].includes(o.papel) || $('#empTodos', b).checked;
       o.emps = o.empTodos ? [] : $$('#empList input:checked', b).map(i => i.value);
       if (!o.nome) return toast('Informe o nome');
       if (!o.empTodos && !o.emps.length && !(await confirmar('Nenhum empreendimento marcado: o usuário não verá nenhuma venda. Salvar assim mesmo?'))) return;
