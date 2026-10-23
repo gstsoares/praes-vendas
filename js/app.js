@@ -1142,7 +1142,7 @@ function vUsuarios(el) {
     ${D().users.slice().sort((a, b) => (a.nome || '').localeCompare(b.nome || '')).map(u => `<tr class="click" data-id="${u.id}"><td><span class="row">${avatar(u, 'md')} <b>${esc(u.nome)}</b></span></td><td>${esc(u.email || u.usuario)}</td><td>${PAPEIS[u.papel] || u.papel}</td><td>${esc(u.pessoa)}</td><td style="white-space:normal;max-width:340px">${empsTexto(u)}</td><td>${u.pendente ? '<span class="tag warn">Aguardando liberação</span>' : u.recusado ? '<span class="tag bad">Recusado</span>' : u.ativo === false ? '<span class="tag bad">Inativo</span>' : '<span class="tag ok">Ativo</span>'}</td></tr>`).join('')}</tbody></table></div>`;
     $$('tr[data-id]', el).forEach(t => t.onclick = () => abrir(D().users.find(x => x.id === t.dataset.id)));
   }
-  upd(); return upd;
+  upd(); return () => { const av = $('#avUsr', el); if (av) av.innerHTML = htmlAvisoUsuario(); upd(); };
 }
 
 // ============================ PERFIL ============================
@@ -1168,7 +1168,8 @@ function vPerfil(el) {
   $('#bSenha', el).onclick = async () => { const a = $('#s0', el).value, n = $('#s1', el).value; if (n.length < 6) return toast('Mínimo 6 caracteres'); if (n !== $('#s2', el).value) return toast('As senhas não conferem'); try { await changePassword(a, n); toast('Senha alterada'); $$('input[type=password]', el).forEach(i => i.value = ''); } catch (e) { toast(e.message); } };
   $('#bAvisos', el) && ($('#bAvisos', el).onclick = async () => { await save('config', { ...store.config(), id: 'geral', avisoUsuario: $('#avU', el).checked, avisoBloqueio: $('#avB', el).checked, pix: $('#avPix', el).value.trim() || PIX_PADRAO, valorUsuario: $('#avVal', el).value.trim() || '50,00' }); toast('Avisos salvos'); });
   $('#bReset', el) && ($('#bReset', el).onclick = async () => (await confirmar('Apagar tudo e voltar aos dados de demonstração?')) && resetDemo());
-  return null;
+  let mexeu = false; ['#avU', '#avB', '#avPix', '#avVal'].forEach(q => { const i = $(q, el); if (i) i.addEventListener('input', () => mexeu = true); });
+  return () => { if (mexeu || !$('#avU', el)) return; const a = avisoCfg(); $('#avU', el).checked = a.usuario; $('#avB', el).checked = a.bloqueio; $('#avPix', el).value = a.pix; $('#avVal', el).value = a.valor; };
 }
 
 // ============================ IMPORTAR ============================
