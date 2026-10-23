@@ -228,6 +228,31 @@ function renderShell() {
   $$('#nav a').forEach(a => a.onclick = () => go(a.dataset.r));
   $('#demoTag').classList.toggle('hidden', !store.demo);
 }
+// ---------- avisos do administrador (cobrança) ----------
+const PIX_PADRAO = '62019887000117 - Banco Inter';
+const avisoCfg = () => { const c = store.config(); return { usuario: !!c.avisoUsuario, bloqueio: !!c.avisoBloqueio, pix: c.pix || PIX_PADRAO, valor: c.valorUsuario || '50,00' }; };
+const pixChave = () => (avisoCfg().pix.match(/[\d.\-\/]{11,}/) || [avisoCfg().pix])[0].replace(/\D/g, '') || avisoCfg().pix;
+function copiarPix() { const k = pixChave(); (navigator.clipboard?.writeText(k) || Promise.reject()).then(() => toast('Chave PIX copiada'), () => toast('PIX: ' + k)); }
+function htmlAvisoUsuario() {
+  const a = avisoCfg(); if (!a.usuario) return '';
+  return `<div class="aviso-cob"><b>Atenção:</b> cada novo usuário cadastrado tem custo de <b>R$ ${esc(a.valor)}</b>, pago via PIX ao administrador do sistema.<br>PIX: <b>${esc(a.pix)}</b> <button class="btn sm" type="button" data-pix>Copiar chave</button></div>`;
+}
+let avisoVisto = false;
+function checarAviso() {
+  const ov = $('#avisoOv'); const a = avisoCfg();
+  const deve = store.me && store.me.papel === 'master' && a.bloqueio;
+  if (!deve) { ov && ov.remove(); return; }
+  if (avisoVisto || ov) return;
+  avisoVisto = true;
+  const d = document.createElement('div'); d.id = 'avisoOv'; d.className = 'aviso-ov';
+  d.innerHTML = `<div class="aviso-box" role="alertdialog" aria-modal="true"><div class="aviso-ic">!</div><h2>Aviso de bloqueio</h2>
+    <p>O sistema será <b>bloqueado por falta de pagamento</b>.</p><p>Para evitar o bloqueio, regularize o pagamento via PIX:</p>
+    <div class="aviso-pix">${esc(a.pix)}</div><div class="row" style="justify-content:center;gap:10px"><button class="btn" type="button" data-pix>Copiar chave PIX</button><button class="btn gold" type="button" id="avisoFechar">Fechar</button></div>
+    <p class="muted small mt">Se o pagamento já foi feito, avise o administrador do sistema.</p></div>`;
+  document.body.appendChild(d);
+  $('[data-pix]', d).onclick = copiarPix; $('#avisoFechar', d).onclick = () => d.remove();
+}
+document.addEventListener('click', e => { if (e.target.closest('[data-pix]') && !e.target.closest('#avisoOv')) copiarPix(); });
 function go(r) { route = r; location.hash = r; $('#side').classList.remove('open'); render(); }
 function render() {
   const r = ROUTES.find(x => x.id === route && allowed(x)) || ROUTES[0];
@@ -237,8 +262,9 @@ function render() {
   const el = $('#view'); el.innerHTML = '';
   refresh = r.view(el) || null;
   window.scrollTo(0, 0);
+  $('#avisoOv')?.remove(); avisoVisto = false; checarAviso();
 }
-let rt; store.onData(() => { clearTimeout(rt); rt = setTimeout(() => { if (!store.me) return; renderShell(); if (refresh) { killCharts(); refresh(); } }, 60); });
+let rt; store.onData(() => { clearTimeout(rt); rt = setTimeout(() => { if (!store.me) return; renderShell(); if (refresh) { killCharts(); refresh(); } checarAviso(); }, 60); });
 
 // ============================ PAINEL ============================
 function vPainel(el) {
@@ -1053,12 +1079,12 @@ function empsTexto(u) {
 }
 function vUsuarios(el) {
   $('#topActions').innerHTML = '<button class="btn gold" id="bNovo">+ Novo usuário</button>';
-  el.innerHTML = `<p class="muted">Papéis: <b>Administrador do sistema</b> libera novos cadastros e altera o imposto · <b>Master</b> vê e administra tudo (novos usuários precisam de liberação) · <b>Diretor</b> vê todas as vendas <i>dos empreendimentos liberados</i> · <b>Gerente</b> vê as vendas da equipe dele · <b>Corretor</b> vê só as próprias vendas e comissões.<br>
+  el.innerHTML = `<div id="avUsr">${htmlAvisoUsuario()}</div><p class="muted">Papéis: <b>Administrador do sistema</b> libera novos cadastros e altera o imposto · <b>Master</b> vê e administra tudo (novos usuários precisam de liberação) · <b>Diretor</b> vê todas as vendas <i>dos empreendimentos liberados</i> · <b>Gerente</b> vê as vendas da equipe dele · <b>Corretor</b> vê só as próprias vendas e comissões.<br>
   Para cada usuário (menos master) escolha os <b>empreendimentos/projetos</b> que ele pode acessar — vendas, funil, agenda, comissões e recebimentos de outros projetos ficam invisíveis para ele.</p><div id="res"></div>`;
   function abrir(u0) {
     const u = u0 ? { ...u0, emps: [...(u0.emps || [])] } : { papel: 'corretor', ativo: true, foto: '', empTodos: false, emps: [] };
     const emps = listaEmps();
-    const b = openModal(`<div class="mh"><h2>${u0 ? 'Editar usuário' : 'Novo usuário'}</h2><button class="x" data-close>×</button></div><div class="mb">
+    const b = openModal(`<div class="mh"><h2>${u0 ? 'Editar usuário' : 'Novo usuário'}</h2><button class="x" data-close>×</button></div><div class="mb">${u0 ? '' : htmlAvisoUsuario()}
       <div class="photo-pick"><span id="ph">${avatar(u, 'xl')}</span><div><input type="file" accept="image/*" id="fFoto"><div class="muted small">A foto é recortada em círculo e reduzida automaticamente.</div>${u.foto ? '<button class="btn sm mt" id="rmFoto">Remover foto</button>' : ''}</div></div>
       <div class="form mt"><label class="s2">Nome<input class="in" data-v="nome" value="${esc(u.nome || '')}"></label>
       <label class="s2">E-mail (login)<input class="in" data-v="email" type="email" value="${esc(u.email || '')}" ${u0 ? 'readonly' : ''} autocomplete="off"></label>
@@ -1130,11 +1156,17 @@ function vPerfil(el) {
     <div class="card"><h3>Trocar senha</h3><div class="form" style="grid-template-columns:1fr">
       <label>Senha atual<input class="in" type="password" id="s0" autocomplete="current-password"></label><label>Nova senha<input class="in" type="password" id="s1" autocomplete="new-password"></label><label>Repetir nova senha<input class="in" type="password" id="s2" autocomplete="new-password"></label></div>
       <div class="row mt"><button class="btn dark" id="bSenha">Alterar senha</button></div></div></div>
+    ${store.isDono() ? `<div class="card mt"><h3>Avisos de cobrança (só administrador)</h3>
+      <label class="chk"><input type="checkbox" id="avU" ${avisoCfg().usuario ? 'checked' : ''}><span>Mostrar aviso de custo por usuário na tela <b>Usuários</b> (cadastro de usuário)</span></label>
+      <label class="chk mt"><input type="checkbox" id="avB" ${avisoCfg().bloqueio ? 'checked' : ''}><span>Mostrar pop-up de <b>bloqueio por falta de pagamento</b> para o master (aparece em toda tela e a cada atualização)</span></label>
+      <div class="form mt"><label>Chave PIX / banco<input class="in" id="avPix" value="${esc(avisoCfg().pix)}"></label><label>Valor por usuário (R$)<input class="in" id="avVal" value="${esc(avisoCfg().valor)}"></label></div>
+      <div class="row mt"><button class="btn gold" id="bAvisos">Salvar avisos</button></div></div>` : ''}
     ${store.demo ? '<div class="card mt"><h3>Modo demonstração</h3><p class="muted">Os dados estão só neste navegador. Configure o Firebase (veja o README) para usar de verdade.</p><button class="btn danger" id="bReset">Restaurar dados de demonstração</button></div>' : ''}`;
   let foto = me.foto || '';
   $('#fFoto', el).onchange = async (e) => { const f = e.target.files[0]; if (!f) return; foto = await fotoDeArquivo(f); $('#ph', el).innerHTML = avatar({ nome: me.nome, foto }, 'xl'); };
   $('#bSaveP', el).onclick = async () => { await updateUser(store.uid, { nome: $('#pNome', el).value.trim() || me.nome, foto }); renderShell(); toast('Perfil atualizado'); };
   $('#bSenha', el).onclick = async () => { const a = $('#s0', el).value, n = $('#s1', el).value; if (n.length < 6) return toast('Mínimo 6 caracteres'); if (n !== $('#s2', el).value) return toast('As senhas não conferem'); try { await changePassword(a, n); toast('Senha alterada'); $$('input[type=password]', el).forEach(i => i.value = ''); } catch (e) { toast(e.message); } };
+  $('#bAvisos', el) && ($('#bAvisos', el).onclick = async () => { await save('config', { ...store.config(), id: 'geral', avisoUsuario: $('#avU', el).checked, avisoBloqueio: $('#avB', el).checked, pix: $('#avPix', el).value.trim() || PIX_PADRAO, valorUsuario: $('#avVal', el).value.trim() || '50,00' }); toast('Avisos salvos'); });
   $('#bReset', el) && ($('#bReset', el).onclick = async () => (await confirmar('Apagar tudo e voltar aos dados de demonstração?')) && resetDemo());
   return null;
 }
