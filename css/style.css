@@ -241,3 +241,4 @@ body{padding-bottom:env(safe-area-inset-bottom)}
 .aviso-box p{margin:6px 0;line-height:1.5}
 .aviso-ic{width:54px;height:54px;border-radius:50%;background:#fdecea;color:#c0392b;font-weight:800;font-size:30px;line-height:54px;margin:0 auto}
 .aviso-pix{margin:14px 0;padding:12px;border:1px dashed var(--gold);background:var(--goldbg);border-radius:10px;font-weight:700;font-size:17px;word-break:break-all}
+#lgErr.bloq{background:#fdecea;border:1px solid #f1b0aa;border-left:5px solid #c0392b;color:#7a1c14;border-radius:10px;padding:12px 14px;font-weight:600;line-height:1.5;text-align:left}
