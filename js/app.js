@@ -194,7 +194,31 @@ const perLabel = (F) => { const [a, b] = perRange(F); return F.tipo === 'tudo' ?
 let charts = [];
 function chart(canvas, cfg) { const c = new Chart(canvas, cfg); charts.push(c); return c; }
 function killCharts() { charts.forEach(c => c.destroy()); charts = []; }
-if (window.Chart) { Chart.defaults.font.family = 'Inter, system-ui, sans-serif'; Chart.defaults.color = '#6b6b70'; Chart.defaults.plugins.legend.labels.boxWidth = 12; }
+if (window.Chart) { Chart.defaults.font.family = 'Inter, system-ui, sans-serif'; Chart.defaults.plugins.legend.labels.boxWidth = 12; }
+// ---------- tema claro / escuro ----------
+const corEscura = () => temaAtual() === 'dark' ? '#e4e4e7' : '#1c1c1e';
+const corGrid = () => temaAtual() === 'dark' ? 'rgba(255,255,255,.07)' : '#f0ede6';
+const temaAtual = () => document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+function aplicarTema(t) {
+  document.documentElement.dataset.theme = t;
+  try { localStorage.setItem('praes_tema', t); } catch (e) { }
+  if (window.Chart) { Chart.defaults.color = t === 'dark' ? '#a1a1aa' : '#6b6b70'; Chart.defaults.borderColor = t === 'dark' ? 'rgba(255,255,255,.08)' : 'rgba(0,0,0,.08)'; }
+  const bt = $('#temaBtn'); if (bt) { bt.textContent = t === 'dark' ? '☀' : '☾'; bt.title = t === 'dark' ? 'Modo claro' : 'Modo escuro'; }
+  const mc = document.querySelector('meta[name=theme-color]'); if (mc) mc.content = t === 'dark' ? '#111113' : '#161616';
+}
+aplicarTema(temaAtual());
+$('#temaBtn') && ($('#temaBtn').onclick = () => { aplicarTema(temaAtual() === 'dark' ? 'light' : 'dark'); if (store.me) render(); });
+
+// ---------- tabelas viram cartões no celular ----------
+function cardify(root) {
+  $$('.tbl-wrap > table', root).forEach(t => {
+    if (t.classList.contains('nocards')) return;
+    t.classList.add('cards');
+    const hs = [...t.querySelectorAll('thead th')].map(th => th.textContent.replace(/[▲▼↑↓⇅]/g, '').trim());
+    t.querySelectorAll('tbody tr, tfoot tr').forEach(tr => { let i = 0; [...tr.children].forEach(td => { if (!td.hasAttribute('data-label') && !td.hasAttribute('colspan')) td.setAttribute('data-label', hs[i] || ''); i += Number(td.getAttribute('colspan')) || 1; }); });
+  });
+}
+let cfRaf = 0; new MutationObserver(() => { cancelAnimationFrame(cfRaf); cfRaf = requestAnimationFrame(() => cardify($('#view'))); }).observe($('#view'), { childList: true, subtree: true });
 
 // ============================ ROTAS ============================
 const ROUTES = [
@@ -202,6 +226,7 @@ const ROUTES = [
   { id: 'vendas', label: 'Vendas', ic: '▤', view: vVendas },
   { id: 'funil', label: 'Funil / Pipeline', ic: '⫶', view: vFunil },
   { id: 'agenda', label: 'Agendamentos', ic: '◷', view: vAgenda },
+  { id: 'espelho', label: 'Espelho de vendas', ic: '▦', view: vEspelho, admin: true },
   { id: 'comissoes', label: 'Comissões', ic: '％', view: vComissoes },
   { id: 'receb', label: 'Recebimentos', ic: '⇣', view: vReceb, admin: true },
   { id: 'pagamentos', label: 'Pagamentos', ic: '⇡', view: vPagamentos, master: true },
@@ -226,6 +251,9 @@ function renderShell() {
   $('#sideRole').textContent = PAPEIS[me.papel] || me.papel;
   $('#nav').innerHTML = ROUTES.filter(allowed).map(r => r.sep ? `<div class="sep">${r.sep}</div>` : `<a data-r="${r.id}" class="${route === r.id ? 'on' : ''}"><span class="ic">${r.ic}</span>${r.label}${(r.id === 'liberacoes' || (r.id === 'usuarios' && !store.isDono())) && D().users.some(u => u.pendente) ? `<span class="nbadge">${D().users.filter(u => u.pendente).length}</span>` : ''}</a>`).join('');
   $$('#nav a').forEach(a => a.onclick = () => go(a.dataset.r));
+  const bn = [['painel', '◧', 'Painel'], ['vendas', '▤', 'Vendas'], ['agenda', '◷', 'Agenda'], ['funil', '⫶', 'Funil']];
+  $('#bnav').innerHTML = bn.map(([id, ic, l]) => `<a data-b="${id}" class="${route === id ? 'on' : ''}"><span class="i">${ic}</span>${l}</a>`).join('') + `<a data-b="menu" class="${bn.some(x => x[0] === route) ? '' : 'on'}"><span class="i">☰</span>Mais</a>`;
+  $$('#bnav a').forEach(a => a.onclick = () => a.dataset.b === 'menu' ? $('#side').classList.toggle('open') : go(a.dataset.b));
   $('#demoTag').classList.toggle('hidden', !store.demo);
 }
 // ---------- avisos do administrador (cobrança) ----------
@@ -271,6 +299,7 @@ function vPainel(el) {
   const F = store_get('fPainel', { tipo: 'mes' });
   el.innerHTML = `<div class="filters">${perHTML(F)}<span class="space"></span><span class="muted small" id="perLbl"></span></div><div id="res"></div>`;
   bindPer(el, F, () => { store_set('fPainel', F); upd(); });
+  el.addEventListener('click', e => { const it = e.target.closest('[data-av]'); if (it) { const v = D().vendas.find(x => x.id === it.dataset.av); v && abrirVenda(v); } });
   function upd() {
     killCharts();
     $('#perLbl', el).textContent = 'Período: ' + perLabel(F);
@@ -295,7 +324,15 @@ function vPainel(el) {
     let rAberto = 0, rAtras = 0;
     if (store.isAdmin()) vs.forEach(v => parcelasDaVenda(v, regras).forEach(p => { if (!p.recebido) { if (p.vencimento < hoje()) rAtras += p.valor; else if (p.vencimento <= addDays(hoje(), 30)) rAberto += p.valor; } }));
 
-    $('#res', el).innerHTML = `
+    // alertas de parcelas (só parcelas cadastradas; previsões automáticas ficam de fora)
+    const alertas = [];
+    if (store.isAdmin()) vs.forEach(v => parcelasDaVenda(v, regras).forEach(p => { if (!p.auto && !p.recebido && p.vencimento && p.vencimento <= addDays(hoje(), 7)) alertas.push({ v, p, atras: p.vencimento < hoje() }); }));
+    alertas.sort((a, b) => a.p.vencimento.localeCompare(b.p.vencimento));
+    const nAt = alertas.filter(x => x.atras), nPx = alertas.filter(x => !x.atras);
+    const itemAl = (x) => `<div class="it" data-av="${x.v.id}"><span><b>${fd(x.p.vencimento)}</b> · ${esc(x.v.empreendimento)} ${esc(x.v.unidade || '')} · ${esc(x.v.cliente || '')} <span class="muted small">(${esc(x.p.serie || '')}${x.p.descricao ? ' – ' + esc(x.p.descricao) : ''})</span></span><span class="v">${brl(x.p.valor)}</span></div>`;
+    const htmlAl = alertas.length ? `<div class="card alerta-parc ${nAt.length ? 'bad' : ''}" style="margin-bottom:14px"><h3>⚠ Parcelas para cobrar ${nAt.length ? `<span class="tag bad">${nAt.length} atrasada(s) · ${brl(nAt.reduce((a, x) => a + x.p.valor, 0))}</span>` : ''}${nPx.length ? `<span class="tag warn">${nPx.length} vence(m) em até 7 dias · ${brl(nPx.reduce((a, x) => a + x.p.valor, 0))}</span>` : ''}</h3>
+      <div class="lst">${alertas.slice(0, 12).map(itemAl).join('')}</div>${alertas.length > 12 ? `<div class="muted small mt">+ ${alertas.length - 12} parcela(s). Veja todas em Recebimentos.</div>` : ''}</div>` : '';
+    $('#res', el).innerHTML = htmlAl + `
     <div class="kpis">
       <div class="kpi hl"><div class="l">VGV vendido</div><div class="v">${brlc(vgv)}</div><div class="s">${num(vend.length)} venda(s)</div></div>
       <div class="kpi"><div class="l">Ticket médio</div><div class="v">${brlc(vend.length ? vgv / vend.length : 0)}</div><div class="s">VGV ÷ vendas</div></div>
@@ -335,14 +372,14 @@ function vPainel(el) {
     const mV = ms.map(([y, m]) => all.filter(v => { const d = toDate(dataRef(v)); return d && d.getFullYear() === y && d.getMonth() === m; }));
     chart($('#chM', el), { type: 'bar', data: { labels: ms.map(([y, m]) => MESES[m] + '/' + String(y).slice(2)), datasets: [
       { label: 'VGV', data: mV.map(a => a.reduce((s, v) => s + +v.vgv, 0)), backgroundColor: '#c9a24a', borderRadius: 6, yAxisID: 'y' },
-      { label: 'Vendas', data: mV.map(a => a.length), type: 'line', borderColor: '#1c1c1e', backgroundColor: '#1c1c1e', tension: .3, yAxisID: 'y1' }] },
+      { label: 'Vendas', data: mV.map(a => a.length), type: 'line', borderColor: corEscura(), backgroundColor: corEscura(), tension: .3, yAxisID: 'y1' }] },
       options: { maintainAspectRatio: false, plugins: { tooltip: { callbacks: { label: c => c.dataset.label === 'VGV' ? ' ' + brl(c.raw) : ' ' + c.raw + ' venda(s)' } } },
-        scales: { y: { ticks: { callback: v => brlc(v) }, grid: { color: '#f0ede6' } }, y1: { position: 'right', grid: { display: false }, beginAtZero: true, ticks: { precision: 0 } }, x: { grid: { display: false } } } } });
+        scales: { y: { ticks: { callback: v => brlc(v) }, grid: { color: corGrid() } }, y1: { position: 'right', grid: { display: false }, beginAtZero: true, ticks: { precision: 0 } }, x: { grid: { display: false } } } } });
     const ws = []; const seg = new Date(); seg.setDate(seg.getDate() - ((seg.getDay() + 6) % 7));
     for (let i = 9; i >= 0; i--) { const a = new Date(seg); a.setDate(a.getDate() - 7 * i); const b = new Date(a); b.setDate(a.getDate() + 6); ws.push([iso(a), iso(b)]); }
     const wV = ws.map(R2 => all.filter(v => noPeriodo(dataRef(v), R2)));
-    chart($('#chW', el), { type: 'bar', data: { labels: ws.map(([a]) => fd(a).slice(0, 5)), datasets: [{ label: 'Vendas', data: wV.map(a => a.length), backgroundColor: '#1c1c1e', borderRadius: 6 }] },
-      options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { afterLabel: c => brl(wV[c.dataIndex].reduce((s, v) => s + +v.vgv, 0)) } } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 }, grid: { color: '#f0ede6' } }, x: { grid: { display: false } } } } });
+    chart($('#chW', el), { type: 'bar', data: { labels: ws.map(([a]) => fd(a).slice(0, 5)), datasets: [{ label: 'Vendas', data: wV.map(a => a.length), backgroundColor: corEscura(), borderRadius: 6 }] },
+      options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { afterLabel: c => brl(wV[c.dataIndex].reduce((s, v) => s + +v.vgv, 0)) } } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 }, grid: { color: corGrid() } }, x: { grid: { display: false } } } } });
   }
   upd(); return upd;
 }
@@ -460,6 +497,7 @@ function abrirVenda(v0, preset = {}) {
     </div>
     <div class="card mt" style="box-shadow:none" id="corpoBox"></div>
     <div class="mt" id="parcBox"></div>
+    ${!novo && (v.historico || []).length ? `<details class="card mt" style="box-shadow:none"><summary style="cursor:pointer;font-weight:700">Histórico de alterações (${v.historico.length})</summary><div class="hist mt">${v.historico.slice().reverse().map(h => `<div class="h"><div class="q">${esc(new Date(h.em).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }))} · <b>${esc(h.por || '—')}</b></div><ul>${(h.alt || []).map(([c, de, pa]) => `<li><b>${esc(c)}</b>: ${de ? `<span class="de">${esc(de)}</span> → ` : ''}<span class="para">${esc(pa || '(vazio)')}</span></li>`).join('')}</ul></div>`).join('')}</div></details>` : ''}
   </div>
   <div class="mf">${!novo && adm ? '<button class="btn danger" id="bDel">Excluir</button>' : ''}${!novo ? '<button class="btn" id="bDup">Duplicar</button>' : ''}${mst ? '<button class="btn" id="bDemo">Demonstrativo PDF</button>' : ''}<span class="space"></span><button class="btn" data-close>Fechar</button>${ed ? '<button class="btn gold" id="bSave">Salvar</button>' : ''}</div>`);
 
@@ -791,7 +829,7 @@ function vReceb(el) {
     const ms = []; const n = new Date(); for (let i = 0; i < 6; i++) { const d = new Date(n.getFullYear(), n.getMonth() + i, 1); ms.push(iso(d).slice(0, 7)); }
     const ab = all.filter(x => !x.p.recebido);
     chart($('#chR', el), { type: 'bar', data: { labels: ['Atrasado', ...ms.map(m => MESES[+m.slice(5) - 1] + '/' + m.slice(2, 4))], datasets: [{ label: 'A receber', data: [sum(ab.filter(x => x.p.vencimento < H)), ...ms.map(m => sum(ab.filter(x => x.p.vencimento >= H && x.p.vencimento.startsWith(m))))], backgroundColor: ['#dc2626', ...ms.map(() => '#c9a24a')], borderRadius: 6 }] },
-      options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ' ' + brl(c.raw) } } }, scales: { y: { ticks: { callback: v => brlc(v) }, grid: { color: '#f0ede6' } }, x: { grid: { display: false } } } } });
+      options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ' ' + brl(c.raw) } } }, scales: { y: { ticks: { callback: v => brlc(v) }, grid: { color: corGrid() } }, x: { grid: { display: false } } } } });
   }
   upd(); return upd;
 }
@@ -828,11 +866,20 @@ function vAgenda(el) {
     } else {
       const lst = doMes.sort((a, b) => (a.data + a.hora).localeCompare(b.data + b.hora));
       $('#res', el).innerHTML = kp + `<div class="tbl-wrap"><table><thead><tr><th>Data</th><th>Hora</th><th>Cliente</th><th>Telefone</th><th>Tipo</th><th>Empreendimento</th><th>Corretor</th><th>Status</th></tr></thead><tbody>
-        ${lst.map(a => `<tr class="click" data-a="${a.id}"><td>${fd(a.data)}</td><td>${esc(a.hora)}</td><td>${esc(a.cliente)}</td><td>${esc(a.telefone)}</td><td>${esc(a.tipo)}</td><td>${esc(a.empreendimento)}</td><td>${esc(a.corretor)}</td><td><span class="tag ${cls(a) === 'done' ? 'ok' : cls(a) === 'miss' ? 'bad' : ''}">${esc(a.status)}</span></td></tr>`).join('') || '<tr><td colspan="8" class="empty">Nenhum agendamento</td></tr>'}</tbody></table></div>`;
+        ${lst.map(a => `<tr class="click" data-a="${a.id}"><td>${fd(a.data)}</td><td>${esc(a.hora)}</td><td>${esc(a.cliente)}</td><td>${esc(a.telefone)}${linkZap(a) ? ` <a href="${linkZap(a)}" target="_blank" rel="noopener" class="tag ok" onclick="event.stopPropagation()" title="Abrir WhatsApp">WhatsApp</a>` : ''}</td><td>${esc(a.tipo)}</td><td>${esc(a.empreendimento)}</td><td>${esc(a.corretor)}</td><td><span class="tag ${cls(a) === 'done' ? 'ok' : cls(a) === 'miss' ? 'bad' : ''}">${esc(a.status)}</span></td></tr>`).join('') || '<tr><td colspan="8" class="empty">Nenhum agendamento</td></tr>'}</tbody></table></div>`;
       $$('[data-a]', el).forEach(t => t.onclick = () => abrirAg(D().agendamentos.find(x => x.id === t.dataset.a)));
     }
   }
   upd(); return upd;
+}
+function linkZap(a) {
+  let n = String(a.telefone || '').replace(/\D/g, ''); if (n.length < 10) return '';
+  if (n.length <= 11) n = '55' + n.replace(/^0+/, '');
+  const dia = a.data === hoje() ? 'hoje' : a.data === addDays(hoje(), 1) ? 'amanhã' : `no dia ${fd(a.data)}`;
+  const nome = String(a.cliente || '').trim().split(/\s+/)[0] || '';
+  const quem = (store.me?.nome || '').split(/\s+/)[0];
+  const txt = `Olá${nome ? ' ' + nome.charAt(0) + nome.slice(1).toLowerCase() : ''}, tudo bem? Aqui é ${quem ? quem + ', ' : ''}da PRAES Imóveis. Passando para confirmar ${String(a.tipo || 'o atendimento').toLowerCase().startsWith('visita') ? 'sua ' + String(a.tipo).toLowerCase() : 'nosso agendamento (' + String(a.tipo || '').toLowerCase() + ')'} ${dia}${a.hora ? ' às ' + a.hora : ''}${a.empreendimento ? ' – ' + a.empreendimento : ''}. Posso confirmar?`;
+  return `https://wa.me/${n}?text=${encodeURIComponent(txt)}`;
 }
 function abrirAg(a0, preset = {}) {
   const a = a0 ? { ...a0 } : { data: hoje(), hora: '10:00', status: 'AGENDADO', tipo: TIPOS_AG[0], ...preset };
@@ -845,11 +892,12 @@ function abrirAg(a0, preset = {}) {
     ${inp('empreendimento', 'Empreendimento', 'text', 's2', 'list="dl-e"')}${inp('corretor', 'Corretor', 'text', '', 'list="dl-p"')}${inp('gerente', 'Gerente', 'text', '', 'list="dl-p"')}${inp('diretor', 'Diretoria', 'text', '', 'list="dl-p"')}
     <label>Status<select class="in" data-v="status">${STATUS_AG.map(t => `<option ${t === a.status ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
     <label class="s4">Observação<textarea class="in" rows="2" data-v="obs">${esc(a.obs || '')}</textarea></label></div></div>
-    <div class="mf">${a0 && store.isAdmin() ? '<button class="btn danger" id="bDel">Excluir</button>' : ''}${a0 ? '<button class="btn" id="bConv">Virou cadastro/venda →</button>' : ''}<span class="space"></span><button class="btn" data-close>Fechar</button>${ed ? '<button class="btn gold" id="bSave">Salvar</button>' : ''}</div>`);
+    <div class="mf">${a0 && store.isAdmin() ? '<button class="btn danger" id="bDel">Excluir</button>' : ''}${a0 ? '<button class="btn" id="bConv">Virou cadastro/venda →</button>' : ''}<button class="btn zap" id="bZap" type="button">WhatsApp</button><span class="space"></span><button class="btn" data-close>Fechar</button>${ed ? '<button class="btn gold" id="bSave">Salvar</button>' : ''}</div>`);
   const ler = () => { const o = { ...a }; $$('[data-v]', b).forEach(i => o[i.dataset.v] = ['corretor', 'gerente', 'diretor', 'empreendimento'].includes(i.dataset.v) ? up(i.value) : i.value.trim()); return o; };
   $('[data-v="corretor"]', b).addEventListener('change', e => { const p = pessoaPorNome(e.target.value); if (p) { $('[data-v="gerente"]', b).value = p.gerente || ''; $('[data-v="diretor"]', b).value = p.diretor || ''; } });
   $('#bSave', b) && ($('#bSave', b).onclick = async () => { const o = ler(); if (!o.cliente) return toast('Informe o cliente'); if (o.empreendimento && !empOk({ empreendimento: o.empreendimento })) return toast('Você não tem acesso a este empreendimento'); await save('agendamentos', o); closeModal(); toast('Agendamento salvo'); });
   $('#bDel', b) && ($('#bDel', b).onclick = async () => { if (await confirmar('Excluir agendamento?')) { await remove('agendamentos', a.id); closeModal(); } });
+  $('#bZap', b).onclick = () => { const o = ler(); const u = linkZap(o); if (!u) return toast('Informe o telefone do cliente (com DDD)'); window.open(u, '_blank'); };
   $('#bConv', b) && ($('#bConv', b).onclick = () => { const o = ler(); closeModal(); abrirVenda(null, { cliente: o.cliente, empreendimento: o.empreendimento, corretor: o.corretor, gerente: o.gerente, diretor: o.diretor, obs: `Origem: agendamento ${fd(o.data)} ${o.hora}` }); });
 }
 
@@ -919,8 +967,9 @@ function vEmps(el) {
       <label>Incorporadora<input class="in" data-v="incorporadora" list="dl-i" value="${esc(e.incorporadora || '')}" ${dis}></label>
       <label>Bairro / região<input class="in" data-v="bairro" value="${esc(e.bairro || '')}" ${dis}></label>
       <label class="s2">Regra padrão de comissão<select class="in" data-v="regraPadrao" ${dis}><option value="">—</option>${D().regras.map(r => `<option value="${r.id}" ${r.id === e.regraPadrao ? 'selected' : ''}>${esc(r.nome)} — ${esc(r.projeto)} (${pctf(r.taxa)})</option>`).join('')}</select></label>
-      <label>Situação<select class="in" data-v="ativo" ${dis}><option value="true">Ativo</option><option value="false" ${e.ativo === false ? 'selected' : ''}>Inativo</option></select></label></div>
-      <p class="muted small">A regra padrão é sugerida automaticamente nas novas vendas deste empreendimento.</p></div>
+      <label>Situação<select class="in" data-v="ativo" ${dis}><option value="true">Ativo</option><option value="false" ${e.ativo === false ? 'selected' : ''}>Inativo</option></select></label>
+      <label class="s4">Unidades (espelho de vendas)<textarea class="in" data-v="unidades" rows="4" placeholder="Ex.: TORRE A: 101-110, 201-210&#10;TORRE B: 101-110&#10;ou só: 1-120" ${dis}>${esc(e.unidades || '')}</textarea></label></div>
+      <p class="muted small">A regra padrão é sugerida automaticamente nas novas vendas deste empreendimento. Em <b>Unidades</b>, escreva uma torre/bloco por linha; use "101-110" para sequências e vírgula para separar.</p></div>
       <div class="mf">${e0 && adm ? '<button class="btn danger" id="bDel">Excluir</button>' : ''}<span class="space"></span><button class="btn" data-close>Fechar</button>${adm ? '<button class="btn gold" id="bSave">Salvar</button>' : ''}</div>`);
     $('#bSave', b) && ($('#bSave', b).onclick = async () => { const o = { ...e }; $$('[data-v]', b).forEach(i => o[i.dataset.v] = i.dataset.v === 'ativo' ? i.value === 'true' : ['nome', 'incorporadora'].includes(i.dataset.v) ? up(i.value) : i.value); if (!o.nome) return; await save('empreendimentos', o); closeModal(); toast('Salvo'); });
     $('#bDel', b) && ($('#bDel', b).onclick = async () => { if (await confirmar('Excluir empreendimento?')) { await remove('empreendimentos', e.id); closeModal(); } });
@@ -931,6 +980,71 @@ function vEmps(el) {
     $('#res', el).innerHTML = `<div class="tbl-wrap"><table><thead><tr><th>Empreendimento</th><th>Incorporadora</th><th>Regra padrão</th><th class="n">Cadastros</th><th class="n">Vendas</th><th class="n">VGV vendido</th><th>Situação</th></tr></thead><tbody>
     ${D().empreendimentos.filter(e => empOk({ empreendimento: e.nome })).sort((a, b) => a.nome.localeCompare(b.nome)).map(e => { const m = vs.filter(v => v.empreendimento === e.nome); const mv = m.filter(isVenda); return `<tr class="click" data-id="${e.id}"><td><b>${esc(e.nome)}</b></td><td>${esc(e.incorporadora)}</td><td>${esc(D().regras.find(r => r.id === e.regraPadrao)?.nome || '')}</td><td class="n">${m.length}</td><td class="n">${mv.length}</td><td class="n">${brl(mv.reduce((s, v) => s + +v.vgv, 0))}</td><td>${e.ativo === false ? '<span class="tag bad">Inativo</span>' : '<span class="tag ok">Ativo</span>'}</td></tr>`; }).join('')}</tbody></table></div>`;
     $$('tr[data-id]', el).forEach(t => t.onclick = () => abrir(D().empreendimentos.find(x => x.id === t.dataset.id)));
+  }
+  upd(); return upd;
+}
+
+// ============================ ESPELHO DE VENDAS ============================
+function parseUnidades(txt) {
+  const blocos = [];
+  String(txt || '').split(/\n+/).map(l => l.trim()).filter(Boolean).forEach(l => {
+    let nome = '', resto = l; const m = l.match(/^([^:]+):(.*)$/); if (m) { nome = up(m[1]); resto = m[2]; }
+    const us = [];
+    resto.split(/[,;]+|\s{2,}/).map(t => t.trim()).filter(Boolean).forEach(t => {
+      const r = t.match(/^(\d+)\s*(?:-|a|até)\s*(\d+)$/i);
+      if (r) { const a = +r[1], b = +r[2], w = r[1].length; if (b >= a && b - a <= 2000) for (let i = a; i <= b; i++) us.push(String(i).padStart(w, '0')); }
+      else t.split(/\s+/).forEach(x => x && us.push(up(x)));
+    });
+    if (us.length) blocos.push({ nome, us });
+  });
+  return blocos;
+}
+const espClasse = (v) => { if (!v) return 'disp'; const g = statusInfo(v.status).grupo; return g === 'Vendido' ? 'vend' : g === 'Perdido' ? 'disp' : 'res'; };
+const espPeso = { vend: 3, res: 2, disp: 1 };
+function vEspelho(el) {
+  const F = Object.assign({ emp: '' }, store_get('fEsp', {}));
+  const emps = () => { const nomes = new Set(D().empreendimentos.filter(e => e.ativo !== false).map(e => e.nome)); vendasVis().forEach(v => v.empreendimento && nomes.add(v.empreendimento)); return [...nomes].filter(n => empOk({ empreendimento: n })).sort(); };
+  function upd() {
+    const lista = emps(); if (!F.emp || !lista.includes(F.emp)) F.emp = lista[0] || '';
+    const emp = D().empreendimentos.find(e => e.nome === F.emp);
+    const vs = vendasVis().filter(v => v.empreendimento === F.emp);
+    const blocos = parseUnidades(emp?.unidades);
+    const norm = (x) => up(x).replace(/^0+(?=\d)/, '');
+    const usados = new Set();
+    const achar = (bloco, u) => {
+      let c = vs.filter(v => norm(v.unidade) === norm(u));
+      if (bloco && blocos.length > 1) { const cb = c.filter(v => up(v.torre) === bloco); c = cb.length ? cb : c.filter(v => !v.torre || ['ÚNICA', 'UNICA', ''].includes(up(v.torre))); }
+      c.forEach(v => usados.add(v.id));
+      return c.sort((a, b) => espPeso[espClasse(b)] - espPeso[espClasse(a)] || String(b.dataStatus || b.data || '').localeCompare(String(a.dataStatus || a.data || '')))[0] || null;
+    };
+    const cel = (bloco, u, v) => { const c = espClasse(v); const ativo = v && c !== 'disp';
+      return `<div class="esp-u ${c}" data-u="${esc(u)}" data-b="${esc(bloco)}" ${ativo ? `data-id="${v.id}"` : ''} title="${ativo ? esc(`${v.status} · ${v.cliente || ''} · ${v.corretor || ''}`) : 'Disponível'}">${esc(u)}<small>${ativo ? esc((v.cliente || '').split(' ')[0] || (c === 'vend' ? 'vendida' : statusInfo(v.status).grupo.toLowerCase())) : c === 'disp' && v ? 'caiu/canc.' : 'livre'}</small></div>`; };
+    const partes = blocos.map(b => ({ nome: b.nome, cels: b.us.map(u => [u, achar(b.nome, u)]) }));
+    const extras = vs.filter(v => v.unidade && !usados.has(v.id));
+    const exMap = new Map(); extras.forEach(v => { const k = up(v.torre && !['ÚNICA', 'UNICA'].includes(up(v.torre)) ? v.torre + ' ' : '') + up(v.unidade); const cur = exMap.get(k); if (!cur || espPeso[espClasse(v)] > espPeso[espClasse(cur)]) exMap.set(k, v); });
+    if (exMap.size) partes.push({ nome: blocos.length ? 'Unidades com venda fora da lista cadastrada' : 'Unidades com cadastro/venda', cels: [...exMap.entries()].sort((a, b) => a[0].localeCompare(b[0], 'pt-BR', { numeric: true })).map(([k, v]) => [k, v]), extra: true });
+    const todas = partes.flatMap(p => p.cels); const cnt = { disp: 0, res: 0, vend: 0 }; todas.forEach(([, v]) => cnt[espClasse(v)]++);
+    el.innerHTML = `<div class="filters"><label>Empreendimento<select class="in" id="eEmp">${lista.map(n => `<option ${n === F.emp ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></label><span class="space"></span>${store.isAdmin() && emp ? '<button class="btn" id="eEdit">Cadastrar / editar unidades</button>' : ''}</div>
+      <div class="kpis"><div class="kpi"><div class="l">Disponíveis</div><div class="v" style="color:var(--ok)">${num(cnt.disp)}</div></div><div class="kpi"><div class="l">Em negociação / reserva</div><div class="v" style="color:var(--warn)">${num(cnt.res)}</div></div><div class="kpi"><div class="l">Vendidas</div><div class="v" style="color:var(--bad)">${num(cnt.vend)}</div></div><div class="kpi"><div class="l">Total</div><div class="v">${num(todas.length)}</div></div></div>
+      <div class="esp-leg"><span><i style="background:#22c55e"></i>Disponível</span><span><i style="background:#f59e0b"></i>Em negociação (análise, aprovado, reserva, assinatura)</span><span><i style="background:#ef4444"></i>Vendida (contrato assinado / vendido)</span></div>
+      ${!blocos.length ? `<div class="aviso-cob">As unidades deste empreendimento ainda não foram cadastradas, então aparecem só as que já têm cadastro ou venda. ${store.isAdmin() && emp ? 'Clique em <b>Cadastrar / editar unidades</b> para montar o espelho completo, com as disponíveis.' : ''}</div>` : ''}
+      <div class="card">${partes.map(p => `<div class="esp-bloco"><h4>${esc(p.nome || (blocos.length > 1 ? '' : 'Unidades'))}</h4><div class="esp-grid">${p.cels.map(([u, v]) => cel(p.extra ? '' : p.nome, u, v)).join('')}</div></div>`).join('') || '<div class="empty">Nenhuma unidade</div>'}</div>
+      <p class="muted small">Clique numa unidade vendida ou em negociação para abrir a venda${podeEditar() ? '; numa disponível, para cadastrar uma nova venda nela' : ''}.</p>`;
+    $('#eEmp', el).onchange = (e) => { F.emp = e.target.value; store_set('fEsp', F); upd(); };
+    $('#eEdit', el) && ($('#eEdit', el).onclick = () => {
+      const b = openModal(`<div class="mh"><h2>Unidades · ${esc(emp.nome)}</h2><button class="x" data-close>×</button></div><div class="mb">
+        <p class="muted">Uma torre/bloco por linha. Use <b>101-110</b> para sequências e vírgula para separar. Ex.:</p><pre class="muted small" style="background:var(--card2);padding:8px 10px;border-radius:8px">TORRE A: 101-104, 201-204, 301-304\nTORRE B: 101-104, 201-204\nCASAS: 1-30</pre>
+        <textarea class="in" id="uTxt" rows="8" style="width:100%">${esc(emp.unidades || '')}</textarea><div class="muted small mt" id="uPrev"></div></div>
+        <div class="mf"><span class="space"></span><button class="btn" data-close>Fechar</button><button class="btn gold" id="uSave">Salvar</button></div>`);
+      const prev = () => { const bl = parseUnidades($('#uTxt', b).value); $('#uPrev', b).textContent = bl.length ? bl.map(x => `${x.nome || 'Unidades'}: ${x.us.length}`).join(' · ') + ` · total ${bl.reduce((a, x) => a + x.us.length, 0)} unidade(s)` : 'Nenhuma unidade reconhecida ainda'; };
+      $('#uTxt', b).oninput = prev; prev();
+      $('#uSave', b).onclick = async () => { await save('empreendimentos', { ...emp, unidades: $('#uTxt', b).value.trim() }); closeModal(); toast('Unidades salvas'); };
+    });
+    $$('.esp-u', el).forEach(c => c.onclick = () => {
+      if (c.dataset.id) { const v = D().vendas.find(x => x.id === c.dataset.id); if (v) abrirVenda(v); return; }
+      if (!podeEditar()) return toast('Unidade disponível');
+      abrirVenda(null, { empreendimento: F.emp, unidade: c.dataset.u, torre: c.dataset.b || 'ÚNICA', incorporadora: emp?.incorporadora || '', regra: emp?.regraPadrao || '' });
+    });
   }
   upd(); return upd;
 }
@@ -1279,7 +1393,7 @@ $('#lgEsqueci').onclick = async () => {
   catch (e) { $('#lgErr').textContent = e.message; }
 };
 $('#hamb').onclick = () => $('#side').classList.toggle('open');
-document.addEventListener('click', e => { if (window.innerWidth <= 760 && !e.target.closest('#side') && !e.target.closest('#hamb')) $('#side').classList.remove('open'); });
+document.addEventListener('click', e => { if (window.innerWidth <= 760 && !e.target.closest('#side') && !e.target.closest('#hamb') && !e.target.closest('[data-b="menu"]')) $('#side').classList.remove('open'); });
 
 store.onAuth((ok) => {
   $('#login').classList.toggle('hidden', ok); $('#app').classList.toggle('hidden', !ok);
