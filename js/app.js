@@ -1138,9 +1138,12 @@ function vUsuarios(el) {
   }
   $('#bNovo').onclick = () => abrir(null);
   function upd() {
-    $('#res', el).innerHTML = `<div class="tbl-wrap"><table><thead><tr><th>Usuário</th><th>E-mail</th><th>Papel</th><th>Pessoa vinculada</th><th>Empreendimentos</th><th>Situação</th></tr></thead><tbody>
-    ${D().users.slice().sort((a, b) => (a.nome || '').localeCompare(b.nome || '')).map(u => `<tr class="click" data-id="${u.id}"><td><span class="row">${avatar(u, 'md')} <b>${esc(u.nome)}</b></span></td><td>${esc(u.email || u.usuario)}</td><td>${PAPEIS[u.papel] || u.papel}</td><td>${esc(u.pessoa)}</td><td style="white-space:normal;max-width:340px">${empsTexto(u)}</td><td>${u.pendente ? '<span class="tag warn">Aguardando liberação</span>' : u.recusado ? '<span class="tag bad">Recusado</span>' : u.ativo === false ? '<span class="tag bad">Inativo</span>' : '<span class="tag ok">Ativo</span>'}</td></tr>`).join('')}</tbody></table></div>`;
-    $$('tr[data-id]', el).forEach(t => t.onclick = () => abrir(D().users.find(x => x.id === t.dataset.id)));
+    $('#res', el).innerHTML = `<div class="tbl-wrap"><table><thead><tr><th>Usuário</th><th>E-mail</th><th>Papel</th><th>Pessoa vinculada</th><th>Empreendimentos</th><th>Situação</th>${store.isDono() ? '<th>Acesso</th>' : ''}</tr></thead><tbody>
+    ${D().users.slice().sort((a, b) => (a.nome || '').localeCompare(b.nome || '')).map(u => `<tr class="click" data-id="${u.id}"><td><span class="row">${avatar(u, 'md')} <b>${esc(u.nome)}</b></span></td><td>${esc(u.email || u.usuario)}</td><td>${PAPEIS[u.papel] || u.papel}</td><td>${esc(u.pessoa)}</td><td style="white-space:normal;max-width:340px">${empsTexto(u)}</td><td>${u.pendente ? '<span class="tag warn">Aguardando liberação</span>' : u.recusado ? '<span class="tag bad">Recusado</span>' : u.ativo === false ? '<span class="tag bad">Inativo</span>' : '<span class="tag ok">Ativo</span>'}${u.bloqueado ? ' <span class="tag bad">Bloqueado</span>' : ''}</td>${store.isDono() ? `<td>${u.papel === 'admin' ? '<span class="muted small">—</span>' : `<button class="btn sm ${u.bloqueado ? 'gold' : 'danger'}" data-bloq="${u.id}" type="button">${u.bloqueado ? 'Desbloquear' : 'Bloquear'}</button>`}</td>` : ''}</tr>`).join('')}</tbody></table></div>`;
+    $$('tr[data-id]', el).forEach(t => t.onclick = (e) => { if (e.target.closest('[data-bloq]')) return; abrir(D().users.find(x => x.id === t.dataset.id)); });
+    $$('[data-bloq]', el).forEach(bt => bt.onclick = async (e) => { e.stopPropagation(); const u = D().users.find(x => x.id === bt.dataset.bloq); if (!u) return; const novo = !u.bloqueado;
+      if (novo && !(await confirmar(`Bloquear o acesso de ${u.nome} por falta de pagamento? Ele será desconectado e não conseguirá entrar até você desbloquear.`))) return;
+      await updateUser(u.id, { bloqueado: novo, bloqueadoEm: novo ? new Date().toISOString() : '', bloqueadoPor: novo ? store.me.nome : '' }); toast(novo ? `${u.nome} bloqueado` : `${u.nome} desbloqueado`); });
   }
   upd(); return () => { const av = $('#avUsr', el); if (av) av.innerHTML = htmlAvisoUsuario(); upd(); };
 }
@@ -1156,9 +1159,10 @@ function vPerfil(el) {
     <div class="card"><h3>Trocar senha</h3><div class="form" style="grid-template-columns:1fr">
       <label>Senha atual<input class="in" type="password" id="s0" autocomplete="current-password"></label><label>Nova senha<input class="in" type="password" id="s1" autocomplete="new-password"></label><label>Repetir nova senha<input class="in" type="password" id="s2" autocomplete="new-password"></label></div>
       <div class="row mt"><button class="btn dark" id="bSenha">Alterar senha</button></div></div></div>
-    ${store.isDono() ? `<div class="card mt"><h3>Avisos de cobrança (só administrador)</h3>
+    ${store.isDono() ? `<div class="card mt"><h3>Cobrança e bloqueio (só administrador)</h3>
       <label class="chk"><input type="checkbox" id="avU" ${avisoCfg().usuario ? 'checked' : ''}><span>Mostrar aviso de custo por usuário na tela <b>Usuários</b> (cadastro de usuário)</span></label>
       <label class="chk mt"><input type="checkbox" id="avB" ${avisoCfg().bloqueio ? 'checked' : ''}><span>Mostrar pop-up de <b>bloqueio por falta de pagamento</b> para o master (aparece em toda tela e a cada atualização)</span></label>
+      <label class="chk mt"><input type="checkbox" id="avG" ${store.config().bloqueioGeral ? 'checked' : ''}><span><b style="color:#b3261e">BLOQUEAR O ACESSO DE TODOS</b> por falta de pagamento (menos o administrador). Para bloquear só uma pessoa, use o botão <b>Bloquear</b> na tela Usuários.</span></label>
       <div class="form mt"><label>Chave PIX / banco<input class="in" id="avPix" value="${esc(avisoCfg().pix)}"></label><label>Valor por usuário (R$)<input class="in" id="avVal" value="${esc(avisoCfg().valor)}"></label></div>
       <div class="row mt"><button class="btn gold" id="bAvisos">Salvar avisos</button></div></div>` : ''}
     ${store.demo ? '<div class="card mt"><h3>Modo demonstração</h3><p class="muted">Os dados estão só neste navegador. Configure o Firebase (veja o README) para usar de verdade.</p><button class="btn danger" id="bReset">Restaurar dados de demonstração</button></div>' : ''}`;
@@ -1166,10 +1170,10 @@ function vPerfil(el) {
   $('#fFoto', el).onchange = async (e) => { const f = e.target.files[0]; if (!f) return; foto = await fotoDeArquivo(f); $('#ph', el).innerHTML = avatar({ nome: me.nome, foto }, 'xl'); };
   $('#bSaveP', el).onclick = async () => { await updateUser(store.uid, { nome: $('#pNome', el).value.trim() || me.nome, foto }); renderShell(); toast('Perfil atualizado'); };
   $('#bSenha', el).onclick = async () => { const a = $('#s0', el).value, n = $('#s1', el).value; if (n.length < 6) return toast('Mínimo 6 caracteres'); if (n !== $('#s2', el).value) return toast('As senhas não conferem'); try { await changePassword(a, n); toast('Senha alterada'); $$('input[type=password]', el).forEach(i => i.value = ''); } catch (e) { toast(e.message); } };
-  $('#bAvisos', el) && ($('#bAvisos', el).onclick = async () => { await save('config', { ...store.config(), id: 'geral', avisoUsuario: $('#avU', el).checked, avisoBloqueio: $('#avB', el).checked, pix: $('#avPix', el).value.trim() || PIX_PADRAO, valorUsuario: $('#avVal', el).value.trim() || '50,00' }); toast('Avisos salvos'); });
+  $('#bAvisos', el) && ($('#bAvisos', el).onclick = async () => { const g = $('#avG', el).checked; if (g && !store.config().bloqueioGeral && !(await confirmar('Bloquear o acesso de TODOS os usuários (menos você)? Todos serão desconectados até você desmarcar.'))) return; await save('config', { ...store.config(), id: 'geral', bloqueioGeral: g, avisoUsuario: $('#avU', el).checked, avisoBloqueio: $('#avB', el).checked, pix: $('#avPix', el).value.trim() || PIX_PADRAO, valorUsuario: $('#avVal', el).value.trim() || '50,00' }); toast('Avisos salvos'); });
   $('#bReset', el) && ($('#bReset', el).onclick = async () => (await confirmar('Apagar tudo e voltar aos dados de demonstração?')) && resetDemo());
-  let mexeu = false; ['#avU', '#avB', '#avPix', '#avVal'].forEach(q => { const i = $(q, el); if (i) i.addEventListener('input', () => mexeu = true); });
-  return () => { if (mexeu || !$('#avU', el)) return; const a = avisoCfg(); $('#avU', el).checked = a.usuario; $('#avB', el).checked = a.bloqueio; $('#avPix', el).value = a.pix; $('#avVal', el).value = a.valor; };
+  let mexeu = false; ['#avU', '#avB', '#avG', '#avPix', '#avVal'].forEach(q => { const i = $(q, el); if (i) i.addEventListener('input', () => mexeu = true); });
+  return () => { if (mexeu || !$('#avU', el)) return; const a = avisoCfg(); $('#avU', el).checked = a.usuario; $('#avB', el).checked = a.bloqueio; $('#avG', el).checked = !!store.config().bloqueioGeral; $('#avPix', el).value = a.pix; $('#avVal', el).value = a.valor; };
 }
 
 // ============================ IMPORTAR ============================
@@ -1263,7 +1267,7 @@ function vImportar(el) {
 $('#loginForm').onsubmit = async (e) => {
   e.preventDefault(); $('#lgErr').textContent = '';
   const btn = e.submitter || $('#loginForm button'); btn.disabled = true; btn.textContent = 'Entrando…';
-  try { await login($('#lgUser').value, $('#lgPass').value); } catch (er) { $('#lgErr').textContent = er.message; }
+  try { await login($('#lgUser').value, $('#lgPass').value); } catch (er) { $('#lgErr').textContent = er.message; $('#lgErr').classList.toggle('bloq', /bloqueado/i.test(er.message)); }
   btn.disabled = false; btn.textContent = 'Entrar';
 };
 $('#btnSair').onclick = () => logout();
@@ -1280,7 +1284,7 @@ document.addEventListener('click', e => { if (window.innerWidth <= 760 && !e.tar
 store.onAuth((ok) => {
   $('#login').classList.toggle('hidden', ok); $('#app').classList.toggle('hidden', !ok);
   $('#demoHint').classList.toggle('hidden', !store.demo);
-  if (ok) { route = (location.hash || '#painel').slice(1); render(); } else { $('#lgPass').value = ''; if (store.authMsg) { $('#lgErr').textContent = store.authMsg; store.authMsg = ''; } }
+  if (ok) { route = (location.hash || '#painel').slice(1); render(); } else { $('#lgPass').value = ''; if (store.authMsg) { $('#lgErr').textContent = store.authMsg; $('#lgErr').classList.toggle('bloq', !!store.bloqueioMsg); store.authMsg = ''; store.bloqueioMsg = false; } }
 });
 document.title = `${EMPRESA} · Controle de Vendas`;
 init().catch(e => { console.error(e); alert('Erro ao iniciar: ' + e.message); });

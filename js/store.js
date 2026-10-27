@@ -22,7 +22,18 @@ export const store = {
   onData(cb) { this._cb = cb; },
   onAuth(cb) { this._authCb = cb; },
 };
-const emit = () => store._cb();
+// ---------- bloqueio por falta de pagamento (administrador) ----------
+export function msgBloqueio() { const c = store.data.config.find(x => x.id === 'geral') || {}; return 'Acesso bloqueado por falta de pagamento. Para liberar, faça o PIX para o administrador do sistema: ' + (c.pix || '62019887000117 - Banco Inter') + ' e avise-o.'; }
+export function estaBloqueado(u, cfg) { return !!u && u.papel !== 'admin' && (u.bloqueado === true || (cfg || {}).bloqueioGeral === true); }
+let saindo = false;
+function checarBloqueio() {
+  if (!store.me || saindo) return;
+  const u = store.data.users.find(x => x.id === store.uid) || store.me;
+  if (!estaBloqueado(u, store.config())) return;
+  saindo = true; store.authMsg = msgBloqueio(); store.bloqueioMsg = true;
+  logout().finally(() => { saindo = false; });
+}
+const emit = () => { store._cb(); checarBloqueio(); };
 const toEmail = (u) => String(u || '').trim().toLowerCase();
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
@@ -155,6 +166,11 @@ export async function init() {
     }
     store.me = { id: user.uid, ...snap.data() };
     if (store.me.ativo === false) { store.authMsg = store.me.pendente ? 'Seu cadastro está aguardando liberação do administrador do sistema.' : 'Usuário desativado.'; store.me = null; await fb.authM.signOut(fb.auth); return; }
+    if (store.me.papel !== 'admin') {
+      const g = await fb.fs.getDoc(fb.fs.doc(fb.db, 'config', 'geral')).catch(() => null);
+      const cfg = g && g.exists() ? { id: 'geral', ...g.data() } : {};
+      if (estaBloqueado(store.me, cfg)) { store.data.config = [cfg]; store.authMsg = msgBloqueio(); store.bloqueioMsg = true; store.me = null; await fb.authM.signOut(fb.auth); return; }
+    }
     subscribe();
     store._authCb(true);
   });
@@ -167,6 +183,7 @@ export async function login(email, senha) {
     const senhas = demoSenhasGet();
     if (!u || senhas[u.email] !== senha) throw new Error('E-mail ou senha inválidos.');
     if (u.ativo === false) throw new Error(u.pendente ? 'Seu cadastro está aguardando liberação do administrador do sistema.' : 'Usuário desativado.');
+    if (estaBloqueado(u, store.config())) throw new Error(msgBloqueio());
     store.uid = u.id; store.me = u;
     try { sessionStorage.setItem('praes_demo_sess', u.id); } catch (e) { }
     store._authCb(true); return;
