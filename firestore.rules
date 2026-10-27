@@ -11,7 +11,11 @@ service cloud.firestore {
     function signedIn() { return request.auth != null; }
     function meRef() { return /databases/$(database)/documents/users/$(request.auth.uid); }
     function me() { return get(meRef()).data; }
-    function active() { return signedIn() && exists(meRef()) && me().ativo == true; }
+    function cfgRef() { return /databases/$(database)/documents/config/geral; }
+    // bloqueio por falta de pagamento: individual (users.bloqueado) ou geral (config/geral.bloqueioGeral) – nunca bloqueia o admin
+    function geralBloq() { return exists(cfgRef()) && get(cfgRef()).data.get('bloqueioGeral', false) == true; }
+    function active() { return signedIn() && exists(meRef()) && me().ativo == true &&
+      (me().papel == 'admin' || (me().get('bloqueado', false) != true && !geralBloq())); }
     function papel() { return me().papel; }
     function isDono() { return active() && papel() == 'admin'; }
     function isMaster() { return active() && papel() in ['admin', 'master']; }
@@ -46,6 +50,7 @@ service cloud.firestore {
       allow update: if isDono()
         // master edita, mas não ativa ninguém nem mexe em administrador
         || (isMaster() && resource.data.papel != 'admin' && request.resource.data.papel != 'admin' &&
+            !request.resource.data.diff(resource.data).affectedKeys().hasAny(['bloqueado', 'bloqueadoEm', 'bloqueadoPor']) &&
             (request.resource.data.ativo == false || resource.data.ativo == true) &&
             !(request.resource.data.ativo == true && resource.data.ativo == false))
         // o próprio usuário só altera nome e foto
