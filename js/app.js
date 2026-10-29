@@ -2,8 +2,8 @@ import {
   CARGOS, STATUS, STATUS_VENDA, GRUPOS_FUNIL, FORMAS, statusInfo, slug, isVenda, dataRef, titular, comissoes,
   pendencias, periodo, noPeriodo, iso, addDays, toDate, parcelasDaVenda, gerarParcelas, round2, PRAZO_REPASSE_DIAS,
   participantesDaVenda, taxaDaVenda, cargoLabel, SERIES, IMPOSTO_PADRAO, pagamentosDaVenda
-} from './calc.js';
-import { store, init, login, logout, save, saveMany, remove, createUser, updateUser, changePassword, resetDemo, resetSenha, limparColecoes, liberarUsuario } from './store.js';
+} from './calc.js?v=8';
+import { store, init, login, logout, save, saveMany, remove, createUser, updateUser, changePassword, resetDemo, resetSenha, limparColecoes, liberarUsuario } from './store.js?v=8';
 import { EMPRESA } from './firebase-config.js';
 
 // ============================ HELPERS ============================
@@ -1401,4 +1401,14 @@ store.onAuth((ok) => {
   if (ok) { route = (location.hash || '#painel').slice(1); render(); } else { $('#lgPass').value = ''; if (store.authMsg) { $('#lgErr').textContent = store.authMsg; $('#lgErr').classList.toggle('bloq', !!store.bloqueioMsg); store.authMsg = ''; store.bloqueioMsg = false; } }
 });
 document.title = `${EMPRESA} · Controle de Vendas`;
+// ---------- atualização automática: se saiu versão nova, recarrega ----------
+const APP_V = 8;
+async function checarVersao() {
+  try {
+    const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' }); if (!r.ok) return;
+    const { v } = await r.json();
+    if (Number(v) > APP_V) { const k = 'praes_reload_' + v; let ja = false; try { ja = sessionStorage.getItem(k); sessionStorage.setItem(k, '1'); } catch (e) { } if (!ja) location.reload(); }
+  } catch (e) { }
+}
+checarVersao(); setInterval(checarVersao, 5 * 60 * 1000); document.addEventListener('visibilitychange', () => { if (!document.hidden) checarVersao(); });
 init().catch(e => { console.error(e); alert('Erro ao iniciar: ' + e.message); });
