@@ -15,7 +15,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
 <script>try{if(localStorage.getItem("praes_tema")==="dark")document.documentElement.dataset.theme="dark"}catch(e){}</script>
-<link rel="stylesheet" href="css/style.css?v=8">
+<link rel="stylesheet" href="css/style.css?v=9">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -39,6 +39,7 @@
       <div id="lgOk" class="ok-msg"></div>
     </form>
     <button class="login-link" id="lgEsqueci" type="button">Esqueci minha senha</button>
+    <footer class="rodape login-rod" id="rodapeLogin"></footer>
     <div id="demoHint" class="demo-hint hidden">
       <b>Modo demonstração</b> (Firebase ainda não configurado)<br>
       <code>guigao@exemplo.com</code> (master) · <code>fag@exemplo.com</code> (administrador)<br><code>servantes@exemplo.com</code> (gerente) · <code>selenna@exemplo.com</code> (corretor)<br>senha <code>123456</code>
@@ -69,6 +70,7 @@
       <span class="demo-tag hidden" id="demoTag">DEMONSTRAÇÃO</span>
     </header>
     <main id="view" class="view"></main>
+    <footer class="rodape" id="rodape"></footer>
   </div>
   <div class="bnav" id="bnav"></div>
 </div>
@@ -76,7 +78,7 @@
 <div id="modal" class="modal hidden"><div class="modal-box" id="modalBox"></div></div>
 <div id="toast" class="toast"></div>
 
-<script type="module" src="js/app.js?v=8"></script>
+<script type="module" src="js/app.js?v=9"></script>
 <script>if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).catch(() => {});</script>
 </body>
 </html>
