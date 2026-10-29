@@ -216,13 +216,13 @@ const resumoParc = (l) => { l = l || []; if (!l.length) return ''; const t = l.r
 const resumoPag = (m) => { const v = Object.values(m || {}); return v.length ? `${v.filter(x => x && x.pago).length} pagamento(s) marcado(s) como pago` : ''; };
 function historicoVenda(obj) {
   const old = obj.id ? store.data.vendas.find(x => x.id === obj.id) : null;
-  const base = (old ? old.historico : obj.historico) || [];
+  const base = ((old ? old.historico : obj.historico) || []).map(h => ({ ...h, alt: (h.alt || []).map(x => Array.isArray(x) ? { c: x[0], de: x[1], para: x[2] } : x) }));
   const alt = [];
-  if (!old) alt.push(['Venda', '', 'cadastrada']);
+  if (!old) alt.push({ c: 'Venda', de: '', para: 'cadastrada' });
   else {
     const val = (k, x) => k === 'vgv' ? (x == null || x === '' ? '' : fmtR(x)) : String(x ?? '').trim();
-    HIST_CAMPOS.forEach(([k, l]) => { const a = val(k, old[k]), b = val(k, obj[k]); if (a !== b) alt.push([l, k === 'obs' ? (a ? '(texto anterior)' : '') : a, k === 'obs' ? (b ? '(texto alterado)' : '') : b]); });
-    [['Corpo de vendas (comissões)', resumoCorpo], ['Parcelas de recebimento', resumoParc, 'parcelas'], ['Pagamentos', resumoPag, 'pagamentos']].forEach(([l, f, k]) => { const a = f(old[k || 'participantes']), b = f(obj[k || 'participantes']); if (a !== b) alt.push([l, a, b]); });
+    HIST_CAMPOS.forEach(([k, l]) => { const a = val(k, old[k]), b = val(k, obj[k]); if (a !== b) alt.push({ c: l, de: k === 'obs' ? (a ? '(texto anterior)' : '') : a, para: k === 'obs' ? (b ? '(texto alterado)' : '') : b }); });
+    [['Corpo de vendas (comissões)', resumoCorpo], ['Parcelas de recebimento', resumoParc, 'parcelas'], ['Pagamentos', resumoPag, 'pagamentos']].forEach(([l, f, k]) => { const a = f(old[k || 'participantes']), b = f(obj[k || 'participantes']); if (a !== b) alt.push({ c: l, de: a, para: b }); });
   }
   if (!alt.length) return base;
   return [...base, { em: new Date().toISOString(), por: store.me?.nome || store.me?.email || '', alt }].slice(-80);
