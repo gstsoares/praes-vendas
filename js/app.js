@@ -2,8 +2,8 @@ import {
   CARGOS, STATUS, STATUS_VENDA, GRUPOS_FUNIL, FORMAS, statusInfo, slug, isVenda, dataRef, titular, comissoes,
   pendencias, periodo, noPeriodo, iso, addDays, toDate, parcelasDaVenda, gerarParcelas, round2, PRAZO_REPASSE_DIAS,
   participantesDaVenda, taxaDaVenda, cargoLabel, SERIES, IMPOSTO_PADRAO, pagamentosDaVenda
-} from './calc.js?v=9';
-import { store, init, login, logout, save, saveMany, remove, createUser, updateUser, changePassword, resetDemo, resetSenha, limparColecoes, liberarUsuario } from './store.js?v=9';
+} from './calc.js?v=10';
+import { store, init, login, logout, save, saveMany, remove, createUser, updateUser, changePassword, resetDemo, resetSenha, limparColecoes, liberarUsuario } from './store.js?v=10';
 import { EMPRESA } from './firebase-config.js';
 
 // ============================ HELPERS ============================
@@ -1129,11 +1129,13 @@ function vPagamentos(el) {
       const P = {}; linhas.forEach(x => { const p = P[x.pessoa] = P[x.pessoa] || { nome: x.pessoa, n: 0, bruto: 0, imposto: 0, liquido: 0, pago: 0, apagar: 0, itens: [] }; p.n++; p.bruto += x.bruto; p.imposto += x.imposto; p.liquido += x.liquido; if (x.pago) p.pago += x.liquido; else if (x.recebido) p.apagar += x.liquido; p.itens.push(x); });
       const ps = Object.values(P).sort((a, b) => b.liquido - a.liquido);
       $('#res', el).innerHTML = kp + `<div class="tbl-wrap"><table><thead><tr><th>Pessoa</th><th class="n">Lançamentos</th><th class="n">Bruto</th><th class="n">Imposto</th><th class="n">Líquido</th><th class="n">Pago</th><th class="n">A pagar</th><th></th></tr></thead><tbody>
-        ${ps.map((p, i) => `<tr><td><span class="row">${avatar(p.nome, 'sm')} <b>${esc(p.nome)}</b></span></td><td class="n">${p.n}</td><td class="n">${brl(p.bruto)}</td><td class="n">${brl(p.imposto)}</td><td class="n"><b>${brl(p.liquido)}</b></td><td class="n">${p.pago ? brl(p.pago) : ''}</td><td class="n">${p.apagar ? `<b style="color:var(--warn)">${brl(p.apagar)}</b>` : ''}</td>
-          <td class="row" style="flex-wrap:nowrap"><button class="btn sm" data-ext="${i}">Extrato PDF</button>${p.apagar ? `<button class="btn sm gold" data-pg="${i}">Marcar pago</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">Nada neste período/situação</td></tr>'}
+        ${ps.map((p, i) => `<tr class="click" data-pes="${i}" title="Clique para ver o extrato e marcar pagamentos"><td><span class="row">${avatar(p.nome, 'sm')} <b class="lnk">${esc(p.nome)}</b></span></td><td class="n">${p.n}</td><td class="n">${brl(p.bruto)}</td><td class="n">${brl(p.imposto)}</td><td class="n"><b>${brl(p.liquido)}</b></td><td class="n">${p.pago ? brl(p.pago) : ''}</td><td class="n">${p.apagar ? `<b style="color:var(--warn)">${brl(p.apagar)}</b>` : ''}</td>
+          <td class="row" style="flex-wrap:nowrap"><button class="btn sm" data-ver="${i}">Ver extrato</button><button class="btn sm" data-ext="${i}">PDF</button>${p.apagar ? `<button class="btn sm gold" data-pg="${i}">Marcar pago</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">Nada neste período/situação</td></tr>'}
         </tbody><tfoot><tr><td>Total</td><td class="n">${linhas.length}</td><td class="n">${brl(S(linhas, 'bruto'))}</td><td class="n">${brl(S(linhas, 'imposto'))}</td><td class="n">${brl(S(linhas, 'liquido'))}</td><td colspan="3"></td></tr></tfoot></table></div>`;
-      $$('[data-ext]', el).forEach(bt => bt.onclick = () => extratoPag(ps[+bt.dataset.ext]));
-      $$('[data-pg]', el).forEach(bt => bt.onclick = async () => { const p = ps[+bt.dataset.pg]; const lst = p.itens.filter(x => x.recebido && !x.pago); if (await confirmar(`Marcar ${lst.length} lançamento(s) de ${p.nome} como pagos (líquido ${brl(S(lst, 'liquido'))})?`)) marcar(lst, true); });
+      $$('[data-ext]', el).forEach(bt => bt.onclick = (e) => { e.stopPropagation(); extratoPag(ps[+bt.dataset.ext]); });
+      $$('[data-ver]', el).forEach(bt => bt.onclick = (e) => { e.stopPropagation(); abrirExtrato(ps[+bt.dataset.ver].nome); });
+      $$('tr[data-pes]', el).forEach(tr => tr.onclick = (e) => { if (e.target.closest('button')) return; abrirExtrato(ps[+tr.dataset.pes].nome); });
+      $$('[data-pg]', el).forEach(bt => bt.onclick = async (e) => { e.stopPropagation(); const p = ps[+bt.dataset.pg]; const lst = p.itens.filter(x => x.recebido && !x.pago); if (await confirmar(`Marcar ${lst.length} lançamento(s) de ${p.nome} como pagos (líquido ${brl(S(lst, 'liquido'))})?`)) marcar(lst, true); });
       spec = { titulo: 'Pagamentos por pessoa', cols: [['nome', 'Pessoa'], ['n', 'Lançamentos', 'n'], ['bruto', 'Bruto', 'brl'], ['imposto', 'Imposto', 'brl'], ['liquido', 'Líquido', 'brl'], ['pago', 'Pago', 'brl'], ['apagar', 'A pagar', 'brl']], rows: ps, totais: somar(ps, ['n', 'bruto', 'imposto', 'liquido', 'pago', 'apagar']), orient: 'portrait' };
     } else {
       $('#res', el).innerHTML = kp + `<div class="tbl-wrap" style="max-height:66vh"><table><thead><tr><th>${F.sit === 'previsto' ? 'Previsão' : 'Recebido em'}</th><th>Venda</th><th>Comprador</th><th>Parcela</th><th>Pessoa</th><th>Cargo</th><th class="n">Ref.</th><th class="n">Bruto</th><th class="n">Imposto</th><th class="n">Líquido</th><th>Situação</th><th></th></tr></thead><tbody>
@@ -1150,6 +1152,53 @@ function vPagamentos(el) {
     }
     spec.sub = `Situação: ${{ apagar: 'a pagar', pago: 'pagos', todos: 'todos recebidos', previsto: 'previstos' }[F.sit]} · Período: ${perLabel(F)} · Imposto ${pctf(impostoPct())}${F.emp ? ' · ' + F.emp : ''}`;
     spec.resumo = [['Líquido a pagar', brlc(S(rec.filter(x => !x.pago), 'liquido'))], ['Bruto recebido', brlc(S(rec, 'bruto'))], ['Imposto', brlc(S(rec, 'imposto'))], ['Já pago', brlc(S(rec.filter(x => x.pago), 'liquido'))]];
+  }
+  // ---------- extrato da pessoa na tela, com seleção do que já foi pago ----------
+  function itensPessoa(nome) {
+    const R = perRange(F);
+    return todosPagamentos(true).filter(x => x.pessoa === nome && (!F.emp || x.venda.empreendimento === F.emp) && (F.tipo === 'tudo' || noPeriodo(x.competencia, R)))
+      .sort((a, b) => (a.competencia || '').localeCompare(b.competencia || ''));
+  }
+  function abrirExtrato(nome) {
+    const pp = pessoaPorNome(nome);
+    const sel = new Set();
+    let b = null;
+    const S = (a, k) => a.reduce((s, x) => s + x[k], 0);
+    function desenhar() {
+      const its = itensPessoa(nome);
+      [...sel].forEach(k => { const x = its.find(y => y.key === k); if (!x || x.pago || !x.recebido) sel.delete(k); });
+      const rec = its.filter(x => x.recebido), aPagar = rec.filter(x => !x.pago), pagos = rec.filter(x => x.pago), prev = its.filter(x => !x.recebido);
+      const escolhidos = aPagar.filter(x => sel.has(x.key));
+      const html = `<div class="mh"><h2>${avatar(nome, 'sm')} Extrato · ${esc(nome)}</h2><button class="x" data-close>×</button></div><div class="mb">
+        <p class="muted" style="margin:0 0 10px">${pp?.nomeCompleto ? esc(pp.nomeCompleto) + ' · ' : ''}${pp?.pix ? 'PIX <b>' + esc(pp.pix) + '</b> · ' : ''}Período: ${perLabel(F)}${F.emp ? ' · ' + esc(F.emp) : ''} · Imposto ${pctf(impostoPct())}</p>
+        <div class="kpis" style="margin-bottom:12px">
+          <div class="kpi hl"><div class="l">A pagar</div><div class="v">${brl(S(aPagar, 'liquido'))}</div><div class="s">${aPagar.length} lançamento(s)</div></div>
+          <div class="kpi"><div class="l">Já pago</div><div class="v" style="color:var(--ok)">${brl(S(pagos, 'liquido'))}</div><div class="s">${pagos.length} lançamento(s)</div></div>
+          <div class="kpi"><div class="l">Bruto recebido</div><div class="v">${brl(S(rec, 'bruto'))}</div><div class="s">imposto ${brl(S(rec, 'imposto'))}</div></div>
+          ${prev.length ? `<div class="kpi"><div class="l">Aguardando recebimento</div><div class="v">${brl(S(prev, 'liquido'))}</div><div class="s">${prev.length} previsto(s)</div></div>` : ''}
+        </div>
+        <div class="tbl-wrap"><table><thead><tr><th style="width:34px">${aPagar.length ? `<input type="checkbox" id="xAll" ${aPagar.length && escolhidos.length === aPagar.length ? 'checked' : ''} title="Selecionar todos a pagar">` : ''}</th><th>Data</th><th>Venda</th><th>Comprador</th><th>Parcela</th><th>Cargo</th><th class="n">Ref.</th><th class="n">Bruto</th><th class="n">Imposto</th><th class="n">Líquido</th><th>Situação</th></tr></thead><tbody>
+        ${its.map(x => `<tr class="${sel.has(x.key) ? 'sel' : ''}">
+          <td>${x.recebido && !x.pago ? `<input type="checkbox" data-k="${esc(x.key)}" ${sel.has(x.key) ? 'checked' : ''}>` : ''}</td>
+          <td>${fd(x.competencia)}</td><td class="click" data-vid="${x.venda.id}" style="cursor:pointer"><span><b>${esc(x.venda.empreendimento)}</b> · ${esc(x.venda.unidade || '')}</span></td><td>${esc(x.venda.cliente || '')}</td>
+          <td>${esc(x.parcela.serie || '')} ${esc(x.parcela.descricao || '')}</td><td>${esc(x.cargo)}</td><td class="n">${pctf(x.ref * 100)}</td>
+          <td class="n">${brl(x.bruto)}</td><td class="n">${brl(x.imposto)}</td><td class="n"><b>${brl(x.liquido)}</b></td>
+          <td>${!x.recebido ? '<span class="tag">aguardando recebimento</span>' : x.pago ? `<span class="tag ok">pago ${fd(x.dataPago)}</span> <button class="btn sm" data-un="${esc(x.key)}" type="button">Desfazer</button>` : '<span class="tag warn">a pagar</span>'}</td></tr>`).join('') || '<tr><td colspan="11" class="empty">Nenhum lançamento neste período</td></tr>'}
+        </tbody><tfoot><tr><td></td><td colspan="6">Total</td><td class="n">${brl(S(its, 'bruto'))}</td><td class="n">${brl(S(its, 'imposto'))}</td><td class="n">${brl(S(its, 'liquido'))}</td><td></td></tr></tfoot></table></div>
+        <p class="muted small mt">Marque as caixinhas dos lançamentos que você já pagou e clique em <b>Marcar como pagos</b>. Lançamentos “aguardando recebimento” só podem ser pagos depois que a parcela da comissão for recebida.</p></div>
+        <div class="mf"><button class="btn" id="xPdf" type="button">Extrato PDF</button>${aPagar.length ? `<button class="btn" id="xTodos" type="button">${escolhidos.length === aPagar.length ? 'Desmarcar todos' : 'Selecionar todos a pagar'}</button>` : ''}<span class="space"></span><button class="btn" data-close>Fechar</button>
+          <button class="btn gold" id="xPagar" type="button" ${escolhidos.length ? '' : 'disabled'}>Marcar como pagos${escolhidos.length ? ` (${escolhidos.length} · ${brl(S(escolhidos, 'liquido'))})` : ''}</button></div>`;
+      if (!b) b = openModal(html, 'lg'); else { const st = $('.tbl-wrap', b)?.scrollTop || 0; b.innerHTML = html; $$('[data-close]', b).forEach(x => x.onclick = closeModal); const w = $('.tbl-wrap', b); if (w) w.scrollTop = st; }
+      cardify(b);
+      $('#xTodos', b) && ($('#xTodos', b).onclick = () => { const todos = escolhidos.length === aPagar.length; aPagar.forEach(x => todos ? sel.delete(x.key) : sel.add(x.key)); desenhar(); });
+      $$('[data-k]', b).forEach(c => c.onchange = () => { c.checked ? sel.add(c.dataset.k) : sel.delete(c.dataset.k); desenhar(); });
+      $('#xAll', b) && ($('#xAll', b).onchange = (e) => { aPagar.forEach(x => e.target.checked ? sel.add(x.key) : sel.delete(x.key)); desenhar(); });
+      $$('[data-vid]', b).forEach(t => t.onclick = () => { closeModal(); abrirVenda(D().vendas.find(v => v.id === t.dataset.vid)); });
+      $$('[data-un]', b).forEach(bt => bt.onclick = async () => { const x = its.find(y => y.key === bt.dataset.un); if (x && await confirmar(`Desfazer o pagamento de ${brl(x.liquido)} para ${nome}?`)) { await marcar([x], false); desenhar(); } });
+      $('#xPagar', b).onclick = async () => { if (!escolhidos.length) return; if (!(await confirmar(`Marcar ${escolhidos.length} lançamento(s) de ${nome} como pagos (líquido ${brl(S(escolhidos, 'liquido'))})?`))) return; await marcar(escolhidos, true); sel.clear(); desenhar(); };
+      $('#xPdf', b).onclick = () => { const p = { nome, itens: its, liquido: S(its, 'liquido'), bruto: S(its, 'bruto'), imposto: S(its, 'imposto'), apagar: S(aPagar, 'liquido') }; extratoPag(p); };
+    }
+    desenhar();
   }
   function extratoPag(p) {
     const rows = p.itens.map(x => ({ d: fd(x.competencia), venda: `${x.venda.empreendimento} · ${x.venda.unidade || ''}`, cli: x.venda.cliente, parc: `${x.parcela.serie || ''} ${x.parcela.descricao || ''}`, cargo: x.cargo, ref: x.ref * 100, bruto: x.bruto, imposto: x.imposto, liquido: x.liquido, st: !x.recebido ? 'Aguardando' : x.pago ? 'Pago ' + fd(x.dataPago) : 'A pagar' }));
@@ -1402,7 +1451,7 @@ store.onAuth((ok) => {
 });
 document.title = `${EMPRESA} · Controle de Vendas`;
 // ---------- atualização automática: se saiu versão nova, recarrega ----------
-const APP_V = 9;
+const APP_V = 10;
 const APP_DATA = '29/10/2026';
 const DEV = { nome: 'Gustavo Soares', email: 'gstsoares27@gmail.com', zap: '(11) 95448-5216', zapLink: 'https://wa.me/5511954485216' };
 function rodape(versaoServidor) {
