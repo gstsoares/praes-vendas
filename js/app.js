@@ -2,8 +2,8 @@ import {
   CARGOS, STATUS, STATUS_VENDA, GRUPOS_FUNIL, FORMAS, statusInfo, slug, isVenda, dataRef, titular, comissoes,
   pendencias, periodo, noPeriodo, iso, addDays, toDate, parcelasDaVenda, gerarParcelas, round2, PRAZO_REPASSE_DIAS,
   participantesDaVenda, taxaDaVenda, cargoLabel, SERIES, IMPOSTO_PADRAO, pagamentosDaVenda
-} from './calc.js?v=8';
-import { store, init, login, logout, save, saveMany, remove, createUser, updateUser, changePassword, resetDemo, resetSenha, limparColecoes, liberarUsuario } from './store.js?v=8';
+} from './calc.js?v=9';
+import { store, init, login, logout, save, saveMany, remove, createUser, updateUser, changePassword, resetDemo, resetSenha, limparColecoes, liberarUsuario } from './store.js?v=9';
 import { EMPRESA } from './firebase-config.js';
 
 // ============================ HELPERS ============================
@@ -1402,11 +1402,19 @@ store.onAuth((ok) => {
 });
 document.title = `${EMPRESA} · Controle de Vendas`;
 // ---------- atualização automática: se saiu versão nova, recarrega ----------
-const APP_V = 8;
+const APP_V = 9;
+const APP_DATA = '29/10/2026';
+const DEV = { nome: 'Gustavo Soares', email: 'gstsoares27@gmail.com', zap: '(11) 95448-5216', zapLink: 'https://wa.me/5511954485216' };
+function rodape(versaoServidor) {
+  const nova = versaoServidor && Number(versaoServidor) > APP_V;
+  const html = `<span>Sistema desenvolvido por <b>${DEV.nome}</b> · <a href="mailto:${DEV.email}">${DEV.email}</a> · <a href="${DEV.zapLink}" target="_blank" rel="noopener">WhatsApp ${DEV.zap}</a></span><span class="ver ${nova ? 'old' : ''}" title="${nova ? 'Existe uma versão mais nova: atualize a página' : 'Versão em uso'}">Versão ${APP_V} · atualizada em ${APP_DATA}${nova ? ` · <b>nova versão ${versaoServidor} disponível — atualize a página</b>` : ''}</span>`;
+  ['#rodape', '#rodapeLogin'].forEach(q => { const el = document.querySelector(q); if (el) el.innerHTML = html; });
+}
+rodape();
 async function checarVersao() {
   try {
     const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' }); if (!r.ok) return;
-    const { v } = await r.json();
+    const { v } = await r.json(); rodape(v);
     if (Number(v) > APP_V) { const k = 'praes_reload_' + v; let ja = false; try { ja = sessionStorage.getItem(k); sessionStorage.setItem(k, '1'); } catch (e) { } if (!ja) location.reload(); }
   } catch (e) { }
 }
