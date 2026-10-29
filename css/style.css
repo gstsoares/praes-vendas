@@ -343,3 +343,9 @@ body{padding-bottom:env(safe-area-inset-bottom)}
 .login-rod .ver{width:100%}
 @media (max-width:760px){ .rodape{padding:12px 16px 16px;flex-direction:column;gap:4px} }
 @media print{ .rodape{display:none} }
+.modal-box.lg{max-width:1180px}
+tr.click .lnk{text-decoration:underline;text-decoration-color:var(--gold);text-underline-offset:3px}
+.tbl-wrap tr.sel td{background:var(--goldbg)}
+.tbl-wrap input[type=checkbox]{width:18px;height:18px;accent-color:var(--gold);cursor:pointer;vertical-align:middle}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.mh h2{display:flex;align-items:center;gap:10px}
