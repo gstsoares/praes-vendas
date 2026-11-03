@@ -2,8 +2,8 @@ import {
   CARGOS, STATUS, STATUS_VENDA, GRUPOS_FUNIL, FORMAS, statusInfo, slug, isVenda, dataRef, titular, comissoes,
   pendencias, periodo, noPeriodo, iso, addDays, toDate, parcelasDaVenda, gerarParcelas, round2, PRAZO_REPASSE_DIAS,
   participantesDaVenda, taxaDaVenda, cargoLabel, SERIES, IMPOSTO_PADRAO, pagamentosDaVenda
-} from './calc.js?v=11';
-import { store, init, login, logout, save, saveMany, remove, createUser, updateUser, changePassword, resetDemo, resetSenha, limparColecoes, liberarUsuario } from './store.js?v=11';
+} from './calc.js?v=12';
+import { store, init, login, logout, save, saveMany, remove, createUser, updateUser, changePassword, resetDemo, resetSenha, limparColecoes, liberarUsuario } from './store.js?v=12';
 import { EMPRESA } from './firebase-config.js';
 
 // ============================ HELPERS ============================
@@ -938,23 +938,49 @@ function vEquipe(el) {
   }
   upd(); return upd;
 }
+// Troca o nome de uma pessoa em todo o sistema (vendas, corpo de vendas, agendamentos, equipes, roletas e usuários)
+async function renomearPessoa(de, para) {
+  de = up(de); para = up(para); if (!de || !para || de === para) return null;
+  const fixV = (o) => { let ch = false; for (const k of ['corretor', 'gerente', 'diretor']) if (up(o[k]) === de) { o[k] = para; ch = true; } for (const k in (o.corpo || {})) if (up(o.corpo[k]) === de) { o.corpo[k] = para; ch = true; } (o.participantes || []).forEach(x => { if (up(x.pessoa) === de) { x.pessoa = para; ch = true; } }); return ch; };
+  const vs = D().vendas.map(v => ({ ...v, corpo: { ...(v.corpo || {}) }, participantes: (v.participantes || []).map(x => ({ ...x })) })).filter(fixV);
+  const ags = D().agendamentos.map(a => ({ ...a })).filter(fixV);
+  const ps = D().pessoas.filter(p => up(p.nome) !== de).map(p => ({ ...p })).filter(p => { let ch = false; if (up(p.gerente) === de) { p.gerente = para; ch = true; } if (up(p.diretor) === de) { p.diretor = para; ch = true; } return ch; });
+  const rs = (D().roleta || []).filter(r => r.ordem).map(r => JSON.parse(JSON.stringify(r))).filter(r => { let ch = false; [...(r.ordem || []), ...(r.atendimentos || [])].forEach(o => { for (const k of ['nome', 'gerente', 'diretor']) if (up(o[k]) === de) { o[k] = para; ch = true; } }); return ch; });
+  const us = D().users.filter(u => up(u.pessoa) === de);
+  if (!(await confirmar(`Trocar o nome ${de} → ${para}?\n\nVai atualizar ${vs.length} venda(s), ${ags.length} agendamento(s), ${ps.length} cadastro(s) de equipe${rs.length ? `, ${rs.length} roleta(s)` : ''}${us.length ? ` e ${us.length} usuário(s)` : ''}.`))) return false;
+  await saveMany('vendas', vs); await saveMany('agendamentos', ags); await saveMany('pessoas', ps);
+  if (rs.length) await saveMany('roleta', rs);
+  for (const u of us) { try { await updateUser(u.id, { pessoa: para }); } catch (e) { console.error(e); } }
+  return { vendas: vs.length };
+}
 function abrirPessoa(p0) {
   const p = p0 ? { ...p0 } : { cargo: 'CORRETOR', tipo: 'PF', ativo: true };
   const adm = store.isAdmin(); const dis = adm ? '' : 'disabled';
   const inp = (f, l, t = 'text', extra = '') => `<label>${l}<input class="in" data-v="${f}" type="${t}" value="${esc(p[f] ?? '')}" ${extra} ${dis}></label>`;
   const b = openModal(`<div class="mh">${avatar(p.nome || '?', 'md')}<h2>${p0 ? esc(p.nome) : 'Nova pessoa'}</h2><button class="x" data-close>×</button></div><div class="mb">${datalists()}<div class="form">
-    ${inp('nome', 'Nome / apelido (como aparece na planilha)', 'text', p0 ? 'readonly' : '')}
+    ${inp('nome', 'Nome / apelido (como aparece na planilha)', 'text', p0 && !store.isMaster() ? 'readonly' : '')}
     <label>Cargo<select class="in" data-v="cargo" ${dis}>${['DIRETOR', 'GERENTE', 'COORDENADOR', 'CORRETOR', 'IMOBILIÁRIA', 'PARCEIRO'].map(c => `<option ${c === p.cargo ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
     ${inp('gerente', 'Gerente (equipe)', 'text', 'list="dl-p"')}${inp('diretor', 'Diretor', 'text', 'list="dl-p"')}
     <label>Tipo<select class="in" data-v="tipo" ${dis}>${['PF', 'PJ', 'PARCEIRO'].map(c => `<option ${c === p.tipo ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
     ${inp('nomeCompleto', 'Nome completo')}${inp('telefone', 'Telefone')}${inp('creci', 'CRECI')}${inp('pix', 'Chave PIX')}
     ${inp('metaVendas', 'Meta mensal (nº vendas)', 'number')}${inp('metaVgv', 'Meta mensal VGV (R$)', 'number')}
     <label>Situação<select class="in" data-v="ativo" ${dis}><option value="true" ${p.ativo !== false ? 'selected' : ''}>Ativo</option><option value="false" ${p.ativo === false ? 'selected' : ''}>Inativo</option></select></label>
-  </div>${p0 ? '<p class="muted small">O nome não pode ser alterado aqui porque é a ligação com as vendas. Para renomear, use "Importar/Exportar".</p>' : ''}</div>
+  </div>${p0 ? (store.isMaster() ? '<p class="muted small">Pode trocar o nome: ao salvar, o sistema atualiza o nome em todas as vendas, comissões, agendamentos, equipes e roletas dessa pessoa.</p>' : '<p class="muted small">Só o master ou o administrador pode trocar o nome (ele é a ligação com as vendas).</p>') : ''}</div>
   <div class="mf">${p0 && adm ? '<button class="btn danger" id="bDel">Excluir</button>' : ''}<span class="space"></span><button class="btn" data-close>Fechar</button>${adm ? '<button class="btn gold" id="bSave">Salvar</button>' : ''}</div>`);
   $('#bSave', b) && ($('#bSave', b).onclick = async () => {
     const o = { ...p }; $$('[data-v]', b).forEach(i => { const k = i.dataset.v; o[k] = k === 'ativo' ? i.value === 'true' : ['metaVendas', 'metaVgv'].includes(k) ? parseNum(i.value) : ['nome', 'gerente', 'diretor'].includes(k) ? up(i.value) : i.value.trim(); });
     if (!o.nome) return toast('Informe o nome'); if (!p0 && pessoaPorNome(o.nome)) return toast('Já existe uma pessoa com esse nome');
+    if (p0 && up(o.nome) !== up(p0.nome)) {
+      const outro = pessoaPorNome(o.nome);
+      if (outro && outro.id !== p0.id && !(await confirmar(`Já existe ${outro.nome} no cadastro. Juntar ${p0.nome} com ${outro.nome}? (o cadastro de ${p0.nome} será removido)`))) return;
+      const r = await renomearPessoa(p0.nome, o.nome); if (r === false) return;
+      const aliases = [...new Set([...(p0.aliases || []), ...(outro?.aliases || []), up(p0.nome)])];
+      if (outro && outro.id !== p0.id) await save('pessoas', { ...outro, aliases });
+      else await save('pessoas', { ...o, id: undefined, apelido: o.nome, aliases });
+      const novoId = outro && outro.id !== p0.id ? outro.id : slug(o.nome);
+      if (novoId !== p0.id) await remove('pessoas', p0.id);
+      closeModal(); toast(`Nome trocado para ${up(o.nome)}`); return;
+    }
     o.apelido = o.apelido || o.nome; await save('pessoas', o); closeModal(); toast('Salvo');
   });
   $('#bDel', b) && ($('#bDel', b).onclick = async () => { if (await confirmar('Excluir pessoa do cadastro? (as vendas não são apagadas)')) { await remove('pessoas', p.id); closeModal(); } });
@@ -1192,47 +1218,70 @@ function vRolFreq(el) {
 
 // ---------- 3. Fechamento do dia ----------
 function vRolFech(el) {
-  const F = Object.assign({ emp: '', data: hoje(), per: 'D' }, store_get('fRolX', {}));
-  $('#topActions').innerHTML = '<button class="btn" id="bFxPdf">PDF do fechamento</button>';
-  let pdf = null;
+  const F = Object.assign({ emp: '__todos', data: hoje(), ate: '', per: 'D' }, store_get('fRolX', {}));
+  $('#topActions').innerHTML = '<button class="btn" id="bFxPdf">PDF do fechamento</button><button class="btn" id="bFxXls">Excel</button>';
+  let pdf = null, xls = [];
   function upd() {
     killCharts();
+    const es = rolEmps(); if (F.emp !== '__todos' && !es.includes(F.emp)) F.emp = '__todos';
+    const todos = F.emp === '__todos';
+    const ate = F.ate && F.ate >= F.data ? F.ate : F.data;
     const pers = F.per === 'D' ? ['M', 'T'] : [F.per];
-    const docs = pers.map(p => rolDoc(F.emp || rolEmps()[0], F.data, p)).filter(Boolean);
-    el.innerHTML = `<div class="filters">${rolFiltros(F, el, `<label>Período<select class="in" data-rf="per">${[['D', 'Dia todo'], ...PERIODOS].map(([k, l]) => `<option value="${k}" ${F.per === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>`)}</div><div id="fxr"></div>`;
+    const docs = D().roleta.filter(r => r.ordem && r.data >= F.data && r.data <= ate && pers.includes(r.periodo) && (todos || r.empreendimento === F.emp))
+      .sort((a, b) => (a.data + a.empreendimento + a.periodo).localeCompare(b.data + b.empreendimento + b.periodo));
+    const umDia = ate === F.data;
+    const lblData = umDia ? `${DIAS_SEM[toDate(F.data).getDay()]} · ${fd(F.data)}` : `${fd(F.data)} a ${fd(ate)}`;
+    const lblPer = F.per === 'D' ? (umDia ? 'Dia todo' : 'Manhã e tarde') : F.per === 'M' ? 'Manhã' : 'Tarde';
+    el.innerHTML = `<div class="filters"><label>Projeto<select class="in" data-rf="emp"><option value="__todos" ${todos ? 'selected' : ''}>Todos os projetos (visão geral)</option>${es.map(n => `<option ${n === F.emp ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></label>
+      <label>Data<input class="in" type="date" data-rf="data" value="${F.data}"></label><label>Até (opcional)<input class="in" type="date" data-rf="ate" value="${F.ate || ''}"></label>
+      <label>Período<select class="in" data-rf="per">${[['D', 'Dia todo'], ...PERIODOS].map(([k, l]) => `<option value="${k}" ${F.per === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      ${F.ate ? '<button class="btn sm" id="fxLimpa" type="button">Só um dia</button>' : ''}</div><div id="fxr"></div>`;
     $$('[data-rf]', el).forEach(i => i.onchange = () => { F[i.dataset.rf] = i.value; store_set('fRolX', F); upd(); });
-    const ats = docs.flatMap(d => d.atendimentos || []);
-    const esc_ = new Map(); docs.forEach(d => d.ordem.forEach(o => { if (!esc_.has(up(o.nome))) esc_.set(up(o.nome), o); }));
+    $('#fxLimpa', el) && ($('#fxLimpa', el).onclick = () => { F.ate = ''; store_set('fRolX', F); upd(); });
+    const ats = docs.flatMap(d => (d.atendimentos || []).map(a => ({ ...a, projeto: d.empreendimento, data: d.data, periodo: d.periodo })));
+    // corretores distintos (por projeto) que estiveram na roleta
+    const esc_ = new Map(); docs.forEach(d => d.ordem.forEach(o => { const k = d.empreendimento + '|' + up(o.nome); if (!esc_.has(k)) esc_.set(k, { ...o, projeto: d.empreendimento }); }));
     const corretores = [...esc_.values()];
     const gerentes = [...new Set([...D().pessoas.filter(p => p.ativo !== false && /GERENTE/i.test(p.cargo || '')).map(p => up(p.nome)), ...corretores.map(o => up(o.gerente)), ...ats.map(a => up(a.gerente))].filter(Boolean))].sort();
-    const porG = gerentes.map(g => ({ g, esc: corretores.filter(o => up(o.gerente) === g).length, at: ats.filter(a => up(a.gerente) === g).length }));
+    const porG = gerentes.map(g => ({ g, esc: corretores.filter(o => up(o.gerente) === g).length, at: ats.filter(a => up(a.gerente) === g).length })).filter(x => !todos || x.esc || x.at);
     const porT = TIPOS_ATEND.map(t => ({ t, n: ats.filter(a => a.tipo === t).length }));
-    $('#fxr', el).innerHTML = `<div class="fech-head"><div class="fh-emp">${esc(F.emp)}</div><div class="fh-data">${DIAS_SEM[toDate(F.data).getDay()]} · ${fd(F.data)} · ${F.per === 'D' ? 'Dia todo' : F.per === 'M' ? 'Manhã' : 'Tarde'}</div></div>
+    const projs = [...new Set(docs.map(d => d.empreendimento))].sort();
+    const porP = projs.map(p => { const a = ats.filter(x => x.projeto === p); return { p, esc: corretores.filter(o => o.projeto === p).length, at: a.length, ...Object.fromEntries(TIPOS_ATEND.map(t => [t, a.filter(x => x.tipo === t).length])), regra: temRegra(p) }; });
+    const tabProj = todos ? `<div class="card mt"><h3>Por projeto <small>${projs.length} projeto(s) com roleta lançada</small></h3><div class="tbl-wrap"><table><thead><tr><th>Projeto</th><th class="n">Na roleta</th><th class="n">Atendimentos</th>${TIPOS_ATEND.map(t => `<th class="n" title="${t}">${t.replace('INDICAÇÃO', 'IND.').replace('RETORNO', 'RET.').replace('PARCERIA', 'PARC.')}</th>`).join('')}<th>Regra freq.</th></tr></thead><tbody>
+        ${porP.map(x => `<tr class="click" data-proj="${esc(x.p)}"><td><b class="lnk">${esc(x.p)}</b></td><td class="n">${x.esc}</td><td class="n"><b>${x.at}</b></td>${TIPOS_ATEND.map(t => `<td class="n">${x[t] || ''}</td>`).join('')}<td>${x.regra ? '<span class="tag warn">sim</span>' : '<span class="tag">não</span>'}</td></tr>`).join('') || `<tr><td colspan="${TIPOS_ATEND.length + 4}" class="empty">Nenhuma roleta lançada neste período</td></tr>`}</tbody>
+        <tfoot><tr><td>Total</td><td class="n">${corretores.length}</td><td class="n">${ats.length}</td>${TIPOS_ATEND.map(t => `<td class="n">${porT.find(x => x.t === t).n || ''}</td>`).join('')}<td></td></tr></tfoot></table></div><p class="muted small mt">Clique num projeto para ver o fechamento só dele.</p></div>` : '';
+    $('#fxr', el).innerHTML = `<div class="fech-head"><div class="fh-emp">${todos ? 'TODOS OS PROJETOS' : esc(F.emp)}</div><div class="fh-data">${lblData} · ${lblPer}</div></div>
+      <div class="kpis mt"><div class="kpi hl"><div class="l">Atendimentos</div><div class="v">${num(ats.length)}</div></div><div class="kpi"><div class="l">Corretores na roleta</div><div class="v">${num(corretores.length)}</div><div class="s">${todos ? 'somando os projetos' : ''}</div></div>${todos ? `<div class="kpi"><div class="l">Projetos com roleta</div><div class="v">${projs.length}</div></div>` : ''}</div>
+      ${tabProj}
       <div class="cols2 mt">
         <div class="card"><h3>Gerentes <small>corretores na roleta e atendimentos</small></h3><div class="tbl-wrap"><table class="nocards"><thead><tr><th>Gerente</th><th class="n">Na roleta</th><th class="n">Atendimentos</th></tr></thead><tbody>
-          ${porG.map(x => `<tr><td><b>${esc(x.g)}</b></td><td class="n">${x.esc}</td><td class="n">${x.at}</td></tr>`).join('')}</tbody><tfoot><tr><td>Total</td><td class="n">${corretores.length}</td><td class="n">${ats.length}</td></tr></tfoot></table></div></div>
+          ${porG.map(x => `<tr><td><b>${esc(x.g)}</b></td><td class="n">${x.esc}</td><td class="n">${x.at}</td></tr>`).join('') || '<tr><td colspan="3" class="empty">Sem dados</td></tr>'}</tbody><tfoot><tr><td>Total</td><td class="n">${corretores.length}</td><td class="n">${ats.length}</td></tr></tfoot></table></div></div>
         <div style="display:flex;flex-direction:column;gap:14px;min-width:0">
         <div class="card"><h3>Share gerentes</h3><div class="cols2" style="gap:8px"><div><div class="muted small c">Atendimentos</div><div class="chart-box" style="height:210px"><canvas id="pA"></canvas></div></div><div><div class="muted small c">Corretores na roleta</div><div class="chart-box" style="height:210px"><canvas id="pE"></canvas></div></div></div></div>
         <div class="card"><h3>Tipos de atendimento</h3><div class="tipos">${porT.map(x => `<div class="tp"><span style="background:${COR_TIPO[x.t]}">${x.t}</span><b>${x.n}</b></div>`).join('')}<div class="tp tot"><span>TOTAL</span><b>${ats.length}</b></div></div></div>
         </div>
       </div>
-      <div class="mt">
-        <div class="card"><h3>Atendimentos <small>${ats.length}</small></h3><div class="tbl-wrap"><table><thead><tr><th>Hora</th><th>Corretor</th><th>Gerente</th><th>Diretoria</th><th>Atendimento</th><th>Observações</th></tr></thead><tbody>
-          ${ats.sort((a, b) => (a.hora || '').localeCompare(b.hora || '')).map(a => `<tr><td>${esc(a.hora || '')}</td><td><b>${esc(a.nome)}</b></td><td>${esc(a.gerente || '')}</td><td>${esc(a.diretor || '')}</td><td><span class="at-tipo" style="background:${COR_TIPO[a.tipo] || '#555'}">${esc(a.tipo)}</span></td><td>${esc([a.cliente, a.obs].filter(Boolean).join(' · '))}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">Nenhum atendimento</td></tr>'}</tbody></table></div></div>
-      </div>
-      <div class="card mt"><h3>Ordem da roleta</h3><div class="tbl-wrap"><table><thead><tr><th>Período</th><th class="n">Nº</th><th>Corretor</th><th>Gerente</th><th>Diretoria</th><th>Empresa de vendas</th></tr></thead><tbody>
-        ${docs.flatMap(d => d.ordem.map((o, i) => `<tr><td>${d.periodo === 'M' ? 'Manhã' : 'Tarde'}</td><td class="n">${i + 1}</td><td><b>${esc(o.nome)}</b></td><td>${esc(o.gerente || '')}</td><td>${esc(o.diretor || '')}</td><td>${esc(o.empresa || '')}</td></tr>`)).join('') || '<tr><td colspan="6" class="empty">Sem roleta lançada</td></tr>'}</tbody></table></div></div>`;
+      <div class="mt"><div class="card"><h3>Atendimentos <small>${ats.length}</small></h3><div class="tbl-wrap"><table><thead><tr>${umDia ? '' : '<th>Data</th>'}${todos ? '<th>Projeto</th>' : ''}<th>Hora</th><th>Corretor</th><th>Gerente</th><th>Diretoria</th><th>Atendimento</th><th>Observações</th></tr></thead><tbody>
+          ${ats.sort((a, b) => (a.data + (a.hora || '')).localeCompare(b.data + (b.hora || ''))).map(a => `<tr>${umDia ? '' : `<td>${fd(a.data)}</td>`}${todos ? `<td>${esc(a.projeto)}</td>` : ''}<td>${esc(a.hora || '')}</td><td><b>${esc(a.nome)}</b></td><td>${esc(a.gerente || '')}</td><td>${esc(a.diretor || '')}</td><td><span class="at-tipo" style="background:${COR_TIPO[a.tipo] || '#555'}">${esc(a.tipo)}</span></td><td>${esc([a.cliente, a.obs].filter(Boolean).join(' · '))}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">Nenhum atendimento</td></tr>'}</tbody></table></div></div></div>
+      <div class="card mt"><h3>Ordem da roleta</h3><div class="tbl-wrap" style="max-height:60vh"><table><thead><tr>${umDia ? '' : '<th>Data</th>'}${todos ? '<th>Projeto</th>' : ''}<th>Período</th><th class="n">Nº</th><th>Corretor</th><th>Gerente</th><th>Diretoria</th><th>Empresa de vendas</th></tr></thead><tbody>
+        ${docs.flatMap(d => d.ordem.map((o, i) => `<tr>${umDia ? '' : `<td>${fd(d.data)}</td>`}${todos ? `<td>${esc(d.empreendimento)}</td>` : ''}<td>${d.periodo === 'M' ? 'Manhã' : 'Tarde'}</td><td class="n">${i + 1}</td><td><b>${esc(o.nome)}</b></td><td>${esc(o.gerente || '')}</td><td>${esc(o.diretor || '')}</td><td>${esc(o.empresa || '')}</td></tr>`)).join('') || '<tr><td colspan="8" class="empty">Sem roleta lançada</td></tr>'}</tbody></table></div></div>`;
+    $$('tr[data-proj]', el).forEach(t => t.onclick = () => { F.emp = t.dataset.proj; store_set('fRolX', F); upd(); window.scrollTo(0, 0); });
     const pal = ['#6aa84f', '#3c78d8', '#e69138', '#a64d79', '#45818e', '#cc4125', '#8e7cc3', '#bf9000', '#76a5af', '#999999'];
     const pie = (id, arr) => { const a = arr.filter(x => x.v > 0); if (!a.length) { $(id, el).parentElement.innerHTML = '<div class="empty">Sem dados</div>'; return; } chart($(id, el), { type: 'pie', data: { labels: a.map(x => x.l), datasets: [{ data: a.map(x => x.v), backgroundColor: a.map((_, i) => pal[i % pal.length]), borderColor: temaAtual() === 'dark' ? '#1b1b1e' : '#fff' }] }, options: { maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10 } } }, tooltip: { callbacks: { label: c => ` ${c.label}: ${c.raw} (${(c.raw / a.reduce((s, x) => s + x.v, 0) * 100).toFixed(1).replace('.', ',')}%)` } } } } }); };
     pie('#pA', porG.map(x => ({ l: x.g, v: x.at }))); pie('#pE', porG.map(x => ({ l: x.g, v: x.esc })));
-    pdf = { titulo: 'Fechamento da roleta', nome: `fechamento_${slug(F.emp)}_${F.data}`, orient: 'portrait', sub: `${F.emp} · ${fd(F.data)} · ${F.per === 'D' ? 'Dia todo' : F.per === 'M' ? 'Manhã' : 'Tarde'}`,
-      resumo: [['Atendimentos', String(ats.length)], ['Corretores na roleta', String(corretores.length)]],
-      tabelas: [{ titulo: 'Gerentes', cols: [['g', 'Gerente'], ['esc', 'Na roleta', 'n'], ['at', 'Atendimentos', 'n']], rows: porG, totais: { esc: corretores.length, at: ats.length } },
+    const tit = todos ? 'Todos os projetos' : F.emp;
+    xls = ats.map(a => ({ DATA: fd(a.data), PROJETO: a.projeto, PERIODO: a.periodo === 'M' ? 'MANHÃ' : 'TARDE', HORA: a.hora || '', CORRETOR: a.nome, GERENTE: a.gerente || '', DIRETORIA: a.diretor || '', EMPRESA: a.empresa || '', ATENDIMENTO: a.tipo, CLIENTE: a.cliente || '', OBS: a.obs || '' }));
+    pdf = { titulo: 'Fechamento da roleta', nome: `fechamento_${todos ? 'todos' : slug(F.emp)}_${F.data}${umDia ? '' : '_' + ate}`, orient: todos ? 'landscape' : 'portrait', sub: `${tit} · ${lblData} · ${lblPer}`,
+      resumo: [['Atendimentos', String(ats.length)], ['Corretores na roleta', String(corretores.length)], ...(todos ? [['Projetos', String(projs.length)]] : [])],
+      tabelas: [
+        ...(todos ? [{ titulo: 'Por projeto', cols: [['p', 'Projeto'], ['esc', 'Na roleta', 'n'], ['at', 'Atendimentos', 'n'], ...TIPOS_ATEND.map(t => [t, t, 'n'])], rows: porP, totais: { esc: corretores.length, at: ats.length, ...Object.fromEntries(porT.map(x => [x.t, x.n])) } }] : []),
+        { titulo: 'Gerentes', cols: [['g', 'Gerente'], ['esc', 'Na roleta', 'n'], ['at', 'Atendimentos', 'n']], rows: porG, totais: { esc: corretores.length, at: ats.length } },
         { titulo: 'Tipos de atendimento', cols: [['t', 'Tipo'], ['n', 'Quantidade', 'n']], rows: porT, totais: { n: ats.length } },
-        { titulo: 'Atendimentos', cols: [['hora', 'Hora'], ['nome', 'Corretor'], ['gerente', 'Gerente'], ['diretor', 'Diretoria'], ['tipo', 'Atendimento'], ['obs', 'Observações']], rows: ats.map(a => ({ ...a, obs: [a.cliente, a.obs].filter(Boolean).join(' · ') })) },
-        { titulo: 'Ordem da roleta', cols: [['p', 'Período'], ['n', 'Nº'], ['nome', 'Corretor'], ['gerente', 'Gerente'], ['diretor', 'Diretoria'], ['empresa', 'Empresa de vendas']], rows: docs.flatMap(d => d.ordem.map((o, i) => ({ p: d.periodo === 'M' ? 'Manhã' : 'Tarde', n: i + 1, ...o }))) }] };
+        { titulo: 'Atendimentos', cols: [...(umDia ? [] : [['d', 'Data']]), ...(todos ? [['projeto', 'Projeto']] : []), ['hora', 'Hora'], ['nome', 'Corretor'], ['gerente', 'Gerente'], ['diretor', 'Diretoria'], ['tipo', 'Atendimento'], ['obs', 'Observações']], rows: ats.map(a => ({ ...a, d: fd(a.data), obs: [a.cliente, a.obs].filter(Boolean).join(' · ') })) },
+        { titulo: 'Ordem da roleta', cols: [...(umDia ? [] : [['d', 'Data']]), ...(todos ? [['projeto', 'Projeto']] : []), ['p', 'Período'], ['n', 'Nº'], ['nome', 'Corretor'], ['gerente', 'Gerente'], ['diretor', 'Diretoria'], ['empresa', 'Empresa de vendas']], rows: docs.flatMap(d => d.ordem.map((o, i) => ({ d: fd(d.data), projeto: d.empreendimento, p: d.periodo === 'M' ? 'Manhã' : 'Tarde', n: i + 1, ...o }))) }] };
   }
   $('#bFxPdf').onclick = () => pdf && gerarPDF(pdf);
+  $('#bFxXls').onclick = () => xls.length ? exportXlsx(xls, 'atendimentos_roleta_' + F.data) : toast('Nenhum atendimento para exportar');
   upd(); return upd;
 }
 
@@ -1621,11 +1670,7 @@ function vImportar(el) {
   $('#bX', el).onclick = () => exportXlsx(D().vendas.map(v => ({ DATA: fd(v.data), 'EMPREEND.': v.empreendimento, 'UNID.': v.unidade, TORRE: v.torre, 'INCORP.': v.incorporadora, CADASTRO: v.cadastro, CLIENTE: v.cliente, CORRETOR: v.corretor, EQUIPE: v.gerente, DIRETORIA: v.diretor, VGV: Number(v.vgv) || null, 'ASSESSORIA RESP.': v.assessoria, STATUS: v.status, 'DATA STATUS': fd(v.dataStatus), 'DATA VENDA': fd(v.dataVenda), FINANCEIRO: v.financeiro, 'OBSERVAÇÃO': v.obs, 'REGRA DE TAXAS': D().regras.find(r => r.id === v.regra)?.nome || '' })), 'vendas_completo_' + hoje());
   $('#bRn', el).onclick = async () => {
     const de = up($('#rnDe', el).value), para = up($('#rnPara', el).value); if (!de || !para || de === para) return;
-    const fix = (o) => { let ch = false; for (const k of ['corretor', 'gerente', 'diretor']) if (o[k] === de) { o[k] = para; ch = true; } for (const k in (o.corpo || {})) if (o.corpo[k] === de) { o.corpo[k] = para; ch = true; } return ch; };
-    const vs = D().vendas.map(v => ({ ...v, corpo: { ...(v.corpo || {}) } })).filter(fix); const ags = D().agendamentos.map(a => ({ ...a })).filter(fix);
-    const ps = D().pessoas.map(p => ({ ...p })).filter(p => { let ch = false; if (p.gerente === de) { p.gerente = para; ch = true; } if (p.diretor === de) { p.diretor = para; ch = true; } return ch; });
-    if (!(await confirmar(`Alterar ${de} → ${para} em ${vs.length} venda(s), ${ags.length} agendamento(s) e ${ps.length} cadastro(s)?`))) return;
-    await saveMany('vendas', vs); await saveMany('agendamentos', ags); await saveMany('pessoas', ps);
+    if ((await renomearPessoa(de, para)) === false) return;
     const old = pessoaPorNome(de), alvo = pessoaPorNome(para);
     if (alvo) await save('pessoas', { ...alvo, aliases: [...new Set([...(alvo.aliases || []), de, ...((old && old.aliases) || [])])] });
     if (old && alvo) await remove('pessoas', old.id); else if (old) { await save('pessoas', { ...old, id: undefined, nome: para, apelido: para, aliases: [...new Set([...(old.aliases || []), de])] }); await remove('pessoas', old.id); }
@@ -1659,7 +1704,7 @@ store.onAuth((ok) => {
 });
 document.title = `${EMPRESA} · Controle de Vendas`;
 // ---------- atualização automática: se saiu versão nova, recarrega ----------
-const APP_V = 11;
+const APP_V = 12;
 const APP_DATA = '03/11/2026';
 const DEV = { nome: 'Gustavo Soares', email: 'gstsoares27@gmail.com', zap: '(11) 95448-5216', zapLink: 'https://wa.me/5511954485216' };
 function rodape(versaoServidor) {

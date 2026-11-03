@@ -1,6 +1,6 @@
 // Camada de dados: Firebase (Auth + Firestore) ou MODO DEMONSTRAÇÃO (localStorage).
 import { firebaseConfig } from './firebase-config.js';
-import { acessoDaVenda, slug } from './calc.js?v=11';
+import { acessoDaVenda, slug } from './calc.js?v=12';
 
 const FB = 'https://www.gstatic.com/firebasejs/10.12.2/';
 export const COLS = ['vendas', 'pessoas', 'regras', 'empreendimentos', 'agendamentos', 'users', 'config', 'roleta'];
