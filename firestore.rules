@@ -64,6 +64,9 @@ service cloud.firestore {
     match /empreendimentos/{id}  { allow read: if active(); allow write: if isAdmin(); }
     match /regras/{id}           { allow read: if active(); allow write: if isAdmin(); }
 
+    // ---------- roleta (escala de plantão): só master e administrador ----------
+    match /roleta/{id} { allow read, write: if isMaster(); }
+
     // ---------- vendas e agendamentos ----------
     match /vendas/{id} {
       allow read: if canSee(resource.data);
