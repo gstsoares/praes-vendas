@@ -2,8 +2,8 @@ import {
   CARGOS, STATUS, STATUS_VENDA, GRUPOS_FUNIL, FORMAS, statusInfo, slug, isVenda, dataRef, titular, comissoes,
   pendencias, periodo, noPeriodo, iso, addDays, toDate, parcelasDaVenda, gerarParcelas, round2, PRAZO_REPASSE_DIAS,
   participantesDaVenda, taxaDaVenda, cargoLabel, SERIES, IMPOSTO_PADRAO, pagamentosDaVenda
-} from './calc.js?v=10';
-import { store, init, login, logout, save, saveMany, remove, createUser, updateUser, changePassword, resetDemo, resetSenha, limparColecoes, liberarUsuario } from './store.js?v=10';
+} from './calc.js?v=11';
+import { store, init, login, logout, save, saveMany, remove, createUser, updateUser, changePassword, resetDemo, resetSenha, limparColecoes, liberarUsuario } from './store.js?v=11';
 import { EMPRESA } from './firebase-config.js';
 
 // ============================ HELPERS ============================
@@ -230,6 +230,11 @@ const ROUTES = [
   { id: 'comissoes', label: 'Comissões', ic: '％', view: vComissoes },
   { id: 'receb', label: 'Recebimentos', ic: '⇣', view: vReceb, admin: true },
   { id: 'pagamentos', label: 'Pagamentos', ic: '⇡', view: vPagamentos, master: true },
+  { sep: 'Roleta', master: true },
+  { id: 'roleta', label: 'Escala do dia', ic: '◎', view: vRoleta, master: true, sub: true },
+  { id: 'rolfreq', label: 'Frequência', ic: '▥', view: vRolFreq, master: true, sub: true },
+  { id: 'rolfech', label: 'Fechamento', ic: '▤', view: vRolFech, master: true, sub: true },
+  { id: 'rolcfg', label: 'Config. da roleta', ic: '⚙', view: vRolCfg, master: true, sub: true },
   { sep: 'Cadastros' },
   { id: 'equipe', label: 'Corretores / Equipe', ic: '☺', view: vEquipe },
   { id: 'emps', label: 'Empreendimentos', ic: '⌂', view: vEmps },
@@ -249,7 +254,7 @@ function renderShell() {
   $('#sideAvatar').outerHTML = `<div id="sideAvatar">${avatar(me, 'xl')}</div>`;
   $('#sideName').textContent = me.nome || me.email;
   $('#sideRole').textContent = PAPEIS[me.papel] || me.papel;
-  $('#nav').innerHTML = ROUTES.filter(allowed).map(r => r.sep ? `<div class="sep">${r.sep}</div>` : `<a data-r="${r.id}" class="${route === r.id ? 'on' : ''}"><span class="ic">${r.ic}</span>${r.label}${(r.id === 'liberacoes' || (r.id === 'usuarios' && !store.isDono())) && D().users.some(u => u.pendente) ? `<span class="nbadge">${D().users.filter(u => u.pendente).length}</span>` : ''}</a>`).join('');
+  $('#nav').innerHTML = ROUTES.filter(allowed).map(r => r.sep ? `<div class="sep">${r.sep}</div>` : `<a data-r="${r.id}" class="${route === r.id ? 'on' : ''}${r.sub ? ' sub' : ''}"><span class="ic">${r.ic}</span>${r.label}${(r.id === 'liberacoes' || (r.id === 'usuarios' && !store.isDono())) && D().users.some(u => u.pendente) ? `<span class="nbadge">${D().users.filter(u => u.pendente).length}</span>` : ''}</a>`).join('');
   $$('#nav a').forEach(a => a.onclick = () => go(a.dataset.r));
   const bn = [['painel', '◧', 'Painel'], ['vendas', '▤', 'Vendas'], ['agenda', '◷', 'Agenda'], ['funil', '⫶', 'Funil']];
   $('#bnav').innerHTML = bn.map(([id, ic, l]) => `<a data-b="${id}" class="${route === id ? 'on' : ''}"><span class="i">${ic}</span>${l}</a>`).join('') + `<a data-b="menu" class="${bn.some(x => x[0] === route) ? '' : 'on'}"><span class="i">☰</span>Mais</a>`;
@@ -1049,6 +1054,209 @@ function vEspelho(el) {
   upd(); return upd;
 }
 
+// ============================ ROLETA (escala de plantão) ============================
+const TIPOS_ATEND = ['ESPONTÂNEA', 'INDICAÇÃO SALÃO', 'RETORNO SALÃO', 'INDICAÇÃO PARCERIA', 'RETORNO PARCERIA', 'CORTESIA', 'PUXADORA'];
+const COR_TIPO = { 'ESPONTÂNEA': '#1e3a6e', 'INDICAÇÃO SALÃO': '#1e3a6e', 'RETORNO SALÃO': '#1e3a6e', 'INDICAÇÃO PARCERIA': '#5b9b4a', 'RETORNO PARCERIA': '#5b9b4a', 'CORTESIA': '#8b93a6', 'PUXADORA': '#8b93a6' };
+const PERIODOS = [['M', 'Manhã'], ['T', 'Tarde']];
+const DIAS_SEM = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+const rolCfg = () => { const c = D().roleta.find(x => x.id === '_config') || {}; return { regra: c.roletaRegra || [], min: Number(c.roletaMin) || 6, empresa: c.roletaEmpresa || 'PRAES IMOB' }; };
+const temRegra = (emp) => rolCfg().regra.includes(slug(emp));
+const rolId = (emp, data, per) => `${slug(emp)}_${data}_${per}`;
+const rolDoc = (emp, data, per) => D().roleta.find(r => r.id === rolId(emp, data, per));
+const segundaDa = (d) => { const x = toDate(d); const w = x.getDay(); return addDays(d, w === 0 ? -6 : 1 - w); };
+const fimDeSemana = (d) => [0, 6].includes(toDate(d).getDay());
+const rolEmps = () => { const s = new Set(D().empreendimentos.filter(e => e.ativo !== false).map(e => e.nome)); D().roleta.forEach(r => s.add(r.empreendimento)); return [...s].filter(Boolean).sort(); };
+// frequência (seg–sex) de cada corretor num projeto, na semana da data informada
+function frequenciaSemana(emp, data) {
+  const seg = segundaDa(data); const f = {};
+  for (let i = 0; i < 5; i++) { const d = addDays(seg, i); PERIODOS.forEach(([p]) => { const r = rolDoc(emp, d, p); (r?.ordem || []).forEach(o => { const k = up(o.nome); (f[k] = f[k] || { nome: o.nome, gerente: o.gerente, diretor: o.diretor, n: 0, marcas: {} }).n++; f[k].marcas[d + p] = true; if (o.gerente) f[k].gerente = o.gerente; }); }); }
+  return f;
+}
+function aptoTag(emp, data, nome) {
+  const fq = frequenciaSemana(emp, data)[up(nome)]?.n || 0; const { min } = rolCfg();
+  if (!temRegra(emp)) return `<span class="tag" title="Projeto sem regra de frequência">${fq} período(s) · sem regra</span>`;
+  return fq >= min ? `<span class="tag ok">apto · ${fq}/${min}</span>` : `<span class="tag bad">não apto · ${fq}/${min}</span>`;
+}
+function rolPessoa(nome) {
+  const p = pessoaPorNome(nome);
+  // sem cadastro: usa o último gerente/diretoria/empresa usados para esse nome em roletas anteriores
+  const ant = D().roleta.filter(r => r.ordem).sort((a, b) => String(b.data).localeCompare(String(a.data))).flatMap(r => r.ordem).find(o => up(o.nome) === up(nome));
+  return { nome: up(nome), gerente: up(p?.gerente || ant?.gerente || ''), diretor: up(p?.diretor || ant?.diretor || ''), empresa: ant?.empresa || rolCfg().empresa };
+}
+function rolFiltros(F, el, extras = '') {
+  const es = rolEmps(); if (!F.emp || !es.includes(F.emp)) F.emp = es[0] || '';
+  return `<label>Projeto<select class="in" data-rf="emp">${es.map(n => `<option ${n === F.emp ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></label>
+    <label>Data<input class="in" type="date" data-rf="data" value="${F.data}"></label>${extras}`;
+}
+
+// ---------- 1. Escala do dia ----------
+function vRoleta(el) {
+  const F = Object.assign({ emp: '', data: hoje(), per: new Date().getHours() < 13 ? 'M' : 'T' }, store_get('fRol', {}), {});
+  $('#topActions').innerHTML = '<button class="btn" id="bRolPdf">PDF da escala</button>';
+  function salvar(r) { return save('roleta', r); }
+  function docAtual() { return rolDoc(F.emp, F.data, F.per) || { id: rolId(F.emp, F.data, F.per), empreendimento: F.emp, data: F.data, periodo: F.per, ordem: [], vez: 0, atendimentos: [] }; }
+  function upd() {
+    const r = docAtual(); const n = r.ordem.length; const vez = n ? (r.vez || 0) % n : 0;
+    const fds = fimDeSemana(F.data); const regra = temRegra(F.emp);
+    const outro = rolDoc(F.emp, F.data, F.per === 'M' ? 'T' : 'M');
+    const dia = DIAS_SEM[toDate(F.data).getDay()];
+    el.innerHTML = `<div class="filters">${rolFiltros(F, el, `<label>Período<select class="in" data-rf="per">${PERIODOS.map(([k, l]) => `<option value="${k}" ${F.per === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>`)}
+      <span class="space"></span><span class="muted small">${dia} · ${regra ? `<span class="tag warn">regra de frequência: ${rolCfg().min} períodos seg–sex</span>` : '<span class="tag">projeto sem regra de frequência</span>'}</span></div>
+      ${fds && regra ? `<div class="aviso-cob">Fim de semana com regra de frequência: cada corretor mostra se está <b>apto</b> (${rolCfg().min} períodos na semana neste projeto). Você pode escalar qualquer um mesmo assim.</div>` : ''}
+      <div class="cols2 rol-cols">
+      <div class="card"><h3>Roleta · ${esc(F.emp)} · ${fd(F.data)} · ${F.per === 'M' ? 'Manhã' : 'Tarde'} <small>${n} corretor(es)</small></h3>
+        <div class="row mt" style="flex-wrap:wrap;gap:8px">${datalists()}
+          <input class="in" id="rAdd" list="dl-p" placeholder="Próximo da lista da obra (ou ex.: POS BARRA)" style="flex:1;min-width:200px">
+          <button class="btn gold" id="rAddBt" type="button">+ Adicionar</button>
+          ${outro?.ordem?.length && !n ? `<button class="btn" id="rCopia" type="button">Copiar da ${F.per === 'M' ? 'tarde' : 'manhã'} (${outro.ordem.length})</button>` : ''}
+        </div>
+        <div class="tbl-wrap mt"><table class="rol-tb"><thead><tr><th class="n">Nº</th><th>Corretor</th><th>Gerente</th><th>Diretoria</th><th>Empresa</th><th>Frequência semana</th><th class="n">Atend.</th><th></th></tr></thead><tbody>
+        ${r.ordem.map((o, i) => `<tr class="${i === vez ? 'vez' : ''}"><td class="n"><b>${i + 1}</b></td><td><b>${esc(o.nome)}</b>${i === vez ? ' <span class="tag ok">da vez</span>' : ''}</td>
+          <td><input class="in sm" data-ed="gerente" data-i="${i}" value="${esc(o.gerente || '')}" list="dl-p"></td><td><input class="in sm" data-ed="diretor" data-i="${i}" value="${esc(o.diretor || '')}" list="dl-p"></td><td><input class="in sm" data-ed="empresa" data-i="${i}" value="${esc(o.empresa || '')}"></td>
+          <td>${aptoTag(F.emp, F.data, o.nome)}</td><td class="n">${(r.atendimentos || []).filter(a => up(a.nome) === up(o.nome)).length}</td>
+          <td class="row" style="flex-wrap:nowrap;gap:4px"><button class="btn sm" data-up="${i}" ${i ? '' : 'disabled'} title="Subir">↑</button><button class="btn sm" data-dn="${i}" ${i < n - 1 ? '' : 'disabled'} title="Descer">↓</button><button class="btn sm" data-vz="${i}" title="Passar a vez para este">▶</button><button class="btn sm danger" data-rm="${i}" title="Tirar da roleta">×</button></td></tr>`).join('') || '<tr><td colspan="8" class="empty">Ninguém na roleta ainda. Lance os corretores na ordem do sorteio feito pela obra (1º, 2º, 3º...).</td></tr>'}
+        </tbody></table></div>
+        <p class="muted small mt">Lance na mesma ordem do resultado do sorteio da obra; use ↑ ↓ para corrigir. Cada corretor na roleta conta 1 período de frequência (${F.per === 'M' ? 'manhã' : 'tarde'} de ${fd(F.data)}) neste projeto. Edite gerente, diretoria e empresa direto na linha.</p></div>
+      <div class="rol-lado" style="display:flex;flex-direction:column;gap:14px">
+        <div class="card vez-card">${n ? `<div class="muted small">PRÓXIMO A ATENDER</div><div class="vez-nome">${esc(r.ordem[vez].nome)}</div><div class="muted small">${esc(r.ordem[vez].gerente || '')}${r.ordem[vez].diretor ? ' · ' + esc(r.ordem[vez].diretor) : ''}</div>
+          <div class="row mt" style="gap:8px;flex-wrap:wrap"><button class="btn gold" id="rAtender" type="button">Chegou cliente → registrar atendimento</button><button class="btn" id="rPular" type="button">Pular a vez</button></div>
+          <div class="muted small mt">Depois de ${esc(r.ordem[vez].nome)}: ${esc(r.ordem[(vez + 1) % n].nome)}</div>` : '<div class="muted">Monte a roleta para ver quem está da vez.</div>'}</div>
+        <div class="card"><h3>Atendimentos deste período <small>${(r.atendimentos || []).length}</small></h3>
+          <div class="lst-at">${(r.atendimentos || []).slice().reverse().map(a => `<div class="at"><span class="at-tipo" style="background:${COR_TIPO[a.tipo] || '#555'}">${esc(a.tipo)}</span><div style="flex:1;min-width:0"><b>${esc(a.nome)}</b> <span class="muted small">${esc(a.hora || '')} · ${esc(a.gerente || '')}</span>${a.cliente ? `<div class="small">${esc(a.cliente)}</div>` : ''}${a.obs ? `<div class="muted small">${esc(a.obs)}</div>` : ''}</div><button class="btn sm danger" data-atdel="${esc(a.id)}" title="Apagar atendimento">×</button></div>`).join('') || '<div class="muted small">Nenhum atendimento ainda.</div>'}</div></div>
+      </div></div>`;
+    $$('[data-rf]', el).forEach(i => i.onchange = () => { F[i.dataset.rf] = i.value; store_set('fRol', { emp: F.emp, per: F.per }); upd(); });
+    const add = async () => { const v = up($('#rAdd', el).value); if (!v) return; const r2 = docAtual(); if (r2.ordem.some(o => up(o.nome) === v)) return toast('Já está na roleta'); r2.ordem = [...r2.ordem, rolPessoa(v)]; await salvar(r2); };
+    $('#rAddBt', el).onclick = add; $('#rAdd', el).onkeydown = (e) => { if (e.key === 'Enter') add(); };
+    $('#rCopia', el) && ($('#rCopia', el).onclick = async () => { await salvar({ ...docAtual(), ordem: outro.ordem.map(o => ({ ...o })), vez: 0 }); toast('Lista copiada. Ajuste a ordem com as setas se precisar.'); });
+    const mexe = async (fn) => { const r2 = JSON.parse(JSON.stringify(docAtual())); fn(r2); await salvar(r2); };
+    $$('[data-up]', el).forEach(b => b.onclick = () => mexe(r2 => { const i = +b.dataset.up; [r2.ordem[i - 1], r2.ordem[i]] = [r2.ordem[i], r2.ordem[i - 1]]; }));
+    $$('[data-dn]', el).forEach(b => b.onclick = () => mexe(r2 => { const i = +b.dataset.dn; [r2.ordem[i + 1], r2.ordem[i]] = [r2.ordem[i], r2.ordem[i + 1]]; }));
+    $$('[data-vz]', el).forEach(b => b.onclick = () => mexe(r2 => { r2.vez = +b.dataset.vz; }));
+    $$('[data-rm]', el).forEach(b => b.onclick = async () => { const i = +b.dataset.rm; if (!(await confirmar(`Tirar ${r.ordem[i].nome} da roleta deste período? (a frequência deste período deixa de contar)`))) return; mexe(r2 => { r2.ordem.splice(i, 1); const v = r2.vez || 0; if (i < v) r2.vez = v - 1; if (r2.vez >= r2.ordem.length) r2.vez = 0; }); });
+    $$('[data-ed]', el).forEach(i => i.onchange = () => mexe(r2 => { r2.ordem[+i.dataset.i][i.dataset.ed] = up(i.value); }));
+    $('#rPular', el) && ($('#rPular', el).onclick = () => mexe(r2 => { r2.vez = ((r2.vez || 0) + 1) % r2.ordem.length; }));
+    $$('[data-atdel]', el).forEach(b => b.onclick = async () => { if (await confirmar('Apagar este atendimento? (a vez não volta)')) mexe(r2 => { r2.atendimentos = (r2.atendimentos || []).filter(a => a.id !== b.dataset.atdel); }); });
+    $('#rAtender', el) && ($('#rAtender', el).onclick = () => {
+      const o = r.ordem[vez];
+      const b = openModal(`<div class="mh"><h2>Atendimento · ${esc(o.nome)}</h2><button class="x" data-close>×</button></div><div class="mb"><div class="form">
+        <label>Corretor<select class="in" id="aNome">${r.ordem.map((x, i) => `<option value="${i}" ${i === vez ? 'selected' : ''}>${i + 1}. ${esc(x.nome)}</option>`).join('')}</select></label>
+        <label>Tipo de atendimento<select class="in" id="aTipo">${TIPOS_ATEND.map(t => `<option>${t}</option>`).join('')}</select></label>
+        <label>Hora<input class="in" type="time" id="aHora" value="${new Date().toTimeString().slice(0, 5)}"></label>
+        <label class="s2">Cliente (opcional)<input class="in" id="aCli"></label>
+        <label class="s4">Observação<input class="in" id="aObs"></label></div>
+        <p class="muted small">Ao salvar, a vez passa para o próximo da roleta. Se escolher outro corretor (fora da vez), a vez continua com ${esc(o.nome)}.</p></div>
+        <div class="mf"><span class="space"></span><button class="btn" data-close>Cancelar</button><button class="btn gold" id="aOk">Salvar atendimento</button></div>`, 'sm');
+      $('#aOk', b).onclick = async () => {
+        const i = +$('#aNome', b).value; const x = r.ordem[i];
+        await mexe(r2 => { r2.atendimentos = [...(r2.atendimentos || []), { id: Date.now().toString(36), hora: $('#aHora', b).value, nome: x.nome, gerente: x.gerente || '', diretor: x.diretor || '', empresa: x.empresa || '', tipo: $('#aTipo', b).value, cliente: $('#aCli', b).value.trim(), obs: $('#aObs', b).value.trim(), por: store.me.nome }]; if (i === vez) r2.vez = (vez + 1) % r2.ordem.length; });
+        closeModal(); toast('Atendimento registrado');
+      };
+    });
+    $('#bRolPdf').onclick = () => { const rr = docAtual(); gerarPDF({ titulo: 'Roleta de plantão', nome: `roleta_${slug(F.emp)}_${F.data}_${F.per}`, orient: 'portrait', sub: `${F.emp} · ${dia} ${fd(F.data)} · ${F.per === 'M' ? 'Manhã' : 'Tarde'}`,
+      resumo: [['Corretores', String(rr.ordem.length)], ['Atendimentos', String((rr.atendimentos || []).length)]],
+      tabelas: [{ titulo: 'Ordem da roleta', cols: [['n', 'Nº'], ['nome', 'Corretor'], ['gerente', 'Gerente'], ['diretor', 'Diretoria'], ['empresa', 'Empresa'], ['fq', 'Frequência']], rows: rr.ordem.map((o, i) => ({ n: i + 1, ...o, fq: aptoTag(F.emp, F.data, o.nome).replace(/<[^>]+>/g, '') })) },
+        { titulo: 'Atendimentos', cols: [['hora', 'Hora'], ['nome', 'Corretor'], ['gerente', 'Gerente'], ['tipo', 'Tipo'], ['cliente', 'Cliente'], ['obs', 'Observação']], rows: rr.atendimentos || [] }] }); };
+  }
+  upd(); return upd;
+}
+
+// ---------- 2. Frequência semanal ----------
+function vRolFreq(el) {
+  const F = Object.assign({ emp: '__todos', data: hoje() }, store_get('fRolF', {}));
+  $('#topActions').innerHTML = '<button class="btn" id="bFqPdf">PDF</button><button class="btn" id="bFqXls">Excel</button>';
+  let exp = [];
+  function upd() {
+    const seg = segundaDa(F.data); const dias = [0, 1, 2, 3, 4].map(i => addDays(seg, i)); const { min } = rolCfg();
+    const es = rolEmps(); const lista = F.emp === '__todos' ? es : [F.emp];
+    exp = [];
+    const blocos = lista.map(emp => {
+      const f = Object.values(frequenciaSemana(emp, seg)).sort((a, b) => b.n - a.n || a.nome.localeCompare(b.nome));
+      if (!f.length) return '';
+      const regra = temRegra(emp);
+      f.forEach(x => exp.push({ PROJETO: emp, CORRETOR: x.nome, GERENTE: x.gerente || '', ...Object.fromEntries(dias.flatMap(d => PERIODOS.map(([p, l]) => [`${DIAS_SEM[toDate(d).getDay()]} ${l}`, x.marcas[d + p] ? 1 : 0]))), TOTAL: x.n, SITUACAO: regra ? (x.n >= min ? 'APTO' : 'NÃO APTO') : 'SEM REGRA' }));
+      return `<div class="card mt"><h3>${esc(emp)} ${regra ? `<span class="tag warn">regra: ${min} períodos</span>` : '<span class="tag">sem regra de frequência</span>'} <small>${f.length} corretor(es)</small></h3>
+        <div class="tbl-wrap"><table class="freq-tb"><thead><tr><th>Corretor</th><th>Gerente</th>${dias.map(d => `<th class="c" colspan="2">${DIAS_SEM[toDate(d).getDay()]} ${fd(d).slice(0, 5)}</th>`).join('')}<th class="n">Total</th><th>Fim de semana</th></tr>
+          <tr class="sub"><th></th><th></th>${dias.map(() => '<th class="c">M</th><th class="c">T</th>').join('')}<th></th><th></th></tr></thead><tbody>
+        ${f.map(x => `<tr><td><b>${esc(x.nome)}</b></td><td>${esc(x.gerente || '')}</td>${dias.map(d => PERIODOS.map(([p]) => `<td class="c">${x.marcas[d + p] ? '<span class="dot ok" title="presente">●</span>' : '<span class="dot">·</span>'}</td>`).join('')).join('')}
+          <td class="n"><b>${x.n}</b></td><td>${regra ? (x.n >= min ? '<span class="tag ok">apto</span>' : `<span class="tag bad">não apto · falta ${min - x.n}</span>`) : '<span class="tag">livre (sem regra)</span>'}</td></tr>`).join('')}</tbody></table></div></div>`;
+    }).join('');
+    el.innerHTML = `<div class="filters"><label>Projeto<select class="in" data-rf="emp"><option value="__todos">Todos os projetos</option>${es.map(n => `<option ${n === F.emp ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></label>
+      <label>Semana de<input class="in" type="date" data-rf="data" value="${F.data}"></label><span class="space"></span><span class="muted small">Segunda ${fd(seg)} a sexta ${fd(addDays(seg, 4))} · cada manhã ou tarde na roleta = 1 período</span></div>
+      ${blocos || '<div class="card mt"><div class="empty">Nenhuma roleta lançada nesta semana.</div></div>'}`;
+    $$('[data-rf]', el).forEach(i => i.onchange = () => { F[i.dataset.rf] = i.value; store_set('fRolF', F); upd(); });
+  }
+  $('#bFqXls').onclick = () => exp.length ? exportXlsx(exp, 'frequencia_' + segundaDa(F.data)) : toast('Nada para exportar');
+  $('#bFqPdf').onclick = () => { if (!exp.length) return toast('Nada para exportar'); const seg = segundaDa(F.data); gerarPDF({ titulo: 'Frequência da semana', nome: 'frequencia_' + seg, sub: `Semana ${fd(seg)} a ${fd(addDays(seg, 4))} · mínimo ${rolCfg().min} períodos nos projetos com regra`, cols: Object.keys(exp[0]).map(k => [k, k.replace('Manhã', 'M').replace('Tarde', 'T')]), rows: exp }); };
+  upd(); return upd;
+}
+
+// ---------- 3. Fechamento do dia ----------
+function vRolFech(el) {
+  const F = Object.assign({ emp: '', data: hoje(), per: 'D' }, store_get('fRolX', {}));
+  $('#topActions').innerHTML = '<button class="btn" id="bFxPdf">PDF do fechamento</button>';
+  let pdf = null;
+  function upd() {
+    killCharts();
+    const pers = F.per === 'D' ? ['M', 'T'] : [F.per];
+    const docs = pers.map(p => rolDoc(F.emp || rolEmps()[0], F.data, p)).filter(Boolean);
+    el.innerHTML = `<div class="filters">${rolFiltros(F, el, `<label>Período<select class="in" data-rf="per">${[['D', 'Dia todo'], ...PERIODOS].map(([k, l]) => `<option value="${k}" ${F.per === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>`)}</div><div id="fxr"></div>`;
+    $$('[data-rf]', el).forEach(i => i.onchange = () => { F[i.dataset.rf] = i.value; store_set('fRolX', F); upd(); });
+    const ats = docs.flatMap(d => d.atendimentos || []);
+    const esc_ = new Map(); docs.forEach(d => d.ordem.forEach(o => { if (!esc_.has(up(o.nome))) esc_.set(up(o.nome), o); }));
+    const corretores = [...esc_.values()];
+    const gerentes = [...new Set([...D().pessoas.filter(p => p.ativo !== false && /GERENTE/i.test(p.cargo || '')).map(p => up(p.nome)), ...corretores.map(o => up(o.gerente)), ...ats.map(a => up(a.gerente))].filter(Boolean))].sort();
+    const porG = gerentes.map(g => ({ g, esc: corretores.filter(o => up(o.gerente) === g).length, at: ats.filter(a => up(a.gerente) === g).length }));
+    const porT = TIPOS_ATEND.map(t => ({ t, n: ats.filter(a => a.tipo === t).length }));
+    $('#fxr', el).innerHTML = `<div class="fech-head"><div class="fh-emp">${esc(F.emp)}</div><div class="fh-data">${DIAS_SEM[toDate(F.data).getDay()]} · ${fd(F.data)} · ${F.per === 'D' ? 'Dia todo' : F.per === 'M' ? 'Manhã' : 'Tarde'}</div></div>
+      <div class="cols2 mt">
+        <div class="card"><h3>Gerentes <small>corretores na roleta e atendimentos</small></h3><div class="tbl-wrap"><table class="nocards"><thead><tr><th>Gerente</th><th class="n">Na roleta</th><th class="n">Atendimentos</th></tr></thead><tbody>
+          ${porG.map(x => `<tr><td><b>${esc(x.g)}</b></td><td class="n">${x.esc}</td><td class="n">${x.at}</td></tr>`).join('')}</tbody><tfoot><tr><td>Total</td><td class="n">${corretores.length}</td><td class="n">${ats.length}</td></tr></tfoot></table></div></div>
+        <div style="display:flex;flex-direction:column;gap:14px;min-width:0">
+        <div class="card"><h3>Share gerentes</h3><div class="cols2" style="gap:8px"><div><div class="muted small c">Atendimentos</div><div class="chart-box" style="height:210px"><canvas id="pA"></canvas></div></div><div><div class="muted small c">Corretores na roleta</div><div class="chart-box" style="height:210px"><canvas id="pE"></canvas></div></div></div></div>
+        <div class="card"><h3>Tipos de atendimento</h3><div class="tipos">${porT.map(x => `<div class="tp"><span style="background:${COR_TIPO[x.t]}">${x.t}</span><b>${x.n}</b></div>`).join('')}<div class="tp tot"><span>TOTAL</span><b>${ats.length}</b></div></div></div>
+        </div>
+      </div>
+      <div class="mt">
+        <div class="card"><h3>Atendimentos <small>${ats.length}</small></h3><div class="tbl-wrap"><table><thead><tr><th>Hora</th><th>Corretor</th><th>Gerente</th><th>Diretoria</th><th>Atendimento</th><th>Observações</th></tr></thead><tbody>
+          ${ats.sort((a, b) => (a.hora || '').localeCompare(b.hora || '')).map(a => `<tr><td>${esc(a.hora || '')}</td><td><b>${esc(a.nome)}</b></td><td>${esc(a.gerente || '')}</td><td>${esc(a.diretor || '')}</td><td><span class="at-tipo" style="background:${COR_TIPO[a.tipo] || '#555'}">${esc(a.tipo)}</span></td><td>${esc([a.cliente, a.obs].filter(Boolean).join(' · '))}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">Nenhum atendimento</td></tr>'}</tbody></table></div></div>
+      </div>
+      <div class="card mt"><h3>Ordem da roleta</h3><div class="tbl-wrap"><table><thead><tr><th>Período</th><th class="n">Nº</th><th>Corretor</th><th>Gerente</th><th>Diretoria</th><th>Empresa de vendas</th></tr></thead><tbody>
+        ${docs.flatMap(d => d.ordem.map((o, i) => `<tr><td>${d.periodo === 'M' ? 'Manhã' : 'Tarde'}</td><td class="n">${i + 1}</td><td><b>${esc(o.nome)}</b></td><td>${esc(o.gerente || '')}</td><td>${esc(o.diretor || '')}</td><td>${esc(o.empresa || '')}</td></tr>`)).join('') || '<tr><td colspan="6" class="empty">Sem roleta lançada</td></tr>'}</tbody></table></div></div>`;
+    const pal = ['#6aa84f', '#3c78d8', '#e69138', '#a64d79', '#45818e', '#cc4125', '#8e7cc3', '#bf9000', '#76a5af', '#999999'];
+    const pie = (id, arr) => { const a = arr.filter(x => x.v > 0); if (!a.length) { $(id, el).parentElement.innerHTML = '<div class="empty">Sem dados</div>'; return; } chart($(id, el), { type: 'pie', data: { labels: a.map(x => x.l), datasets: [{ data: a.map(x => x.v), backgroundColor: a.map((_, i) => pal[i % pal.length]), borderColor: temaAtual() === 'dark' ? '#1b1b1e' : '#fff' }] }, options: { maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10 } } }, tooltip: { callbacks: { label: c => ` ${c.label}: ${c.raw} (${(c.raw / a.reduce((s, x) => s + x.v, 0) * 100).toFixed(1).replace('.', ',')}%)` } } } } }); };
+    pie('#pA', porG.map(x => ({ l: x.g, v: x.at }))); pie('#pE', porG.map(x => ({ l: x.g, v: x.esc })));
+    pdf = { titulo: 'Fechamento da roleta', nome: `fechamento_${slug(F.emp)}_${F.data}`, orient: 'portrait', sub: `${F.emp} · ${fd(F.data)} · ${F.per === 'D' ? 'Dia todo' : F.per === 'M' ? 'Manhã' : 'Tarde'}`,
+      resumo: [['Atendimentos', String(ats.length)], ['Corretores na roleta', String(corretores.length)]],
+      tabelas: [{ titulo: 'Gerentes', cols: [['g', 'Gerente'], ['esc', 'Na roleta', 'n'], ['at', 'Atendimentos', 'n']], rows: porG, totais: { esc: corretores.length, at: ats.length } },
+        { titulo: 'Tipos de atendimento', cols: [['t', 'Tipo'], ['n', 'Quantidade', 'n']], rows: porT, totais: { n: ats.length } },
+        { titulo: 'Atendimentos', cols: [['hora', 'Hora'], ['nome', 'Corretor'], ['gerente', 'Gerente'], ['diretor', 'Diretoria'], ['tipo', 'Atendimento'], ['obs', 'Observações']], rows: ats.map(a => ({ ...a, obs: [a.cliente, a.obs].filter(Boolean).join(' · ') })) },
+        { titulo: 'Ordem da roleta', cols: [['p', 'Período'], ['n', 'Nº'], ['nome', 'Corretor'], ['gerente', 'Gerente'], ['diretor', 'Diretoria'], ['empresa', 'Empresa de vendas']], rows: docs.flatMap(d => d.ordem.map((o, i) => ({ p: d.periodo === 'M' ? 'Manhã' : 'Tarde', n: i + 1, ...o }))) }] };
+  }
+  $('#bFxPdf').onclick = () => pdf && gerarPDF(pdf);
+  upd(); return upd;
+}
+
+// ---------- 4. Configuração ----------
+function vRolCfg(el) {
+  function upd() {
+    const c = rolCfg(); const es = rolEmps();
+    el.innerHTML = `<div class="cols2e"><div class="card"><h3>Regra de frequência por projeto</h3>
+      <p class="muted">Marque os projetos em que o corretor precisa de frequência de segunda a sexta para ficar <b>apto</b> ao plantão de sábado e domingo. Projetos não marcados ficam livres dessa regra, mas a frequência continua sendo contada e mostrada.</p>
+      <div class="emp-grid mt">${es.map(n => `<label class="emp-chk"><input type="checkbox" data-rg="${esc(slug(n))}" ${c.regra.includes(slug(n)) ? 'checked' : ''}> ${esc(n)}</label>`).join('') || '<div class="muted">Cadastre empreendimentos primeiro.</div>'}</div></div>
+      <div class="card"><h3>Parâmetros</h3><div class="form" style="grid-template-columns:1fr">
+        <label>Mínimo de períodos (seg a sex) para o fim de semana<input class="in" id="cMin" type="number" min="1" max="10" value="${c.min}"></label>
+        <label>Empresa de vendas padrão<input class="in" id="cEmp" value="${esc(c.empresa)}"></label></div>
+        <p class="muted small">Cada dia tem 2 períodos (manhã e tarde): de segunda a sexta são até 10 períodos.</p>
+        <div class="row mt"><button class="btn gold" id="cSave">Salvar configuração</button></div></div></div>`;
+    $('#cSave', el).onclick = async () => {
+      const regra = $$('[data-rg]', el).filter(i => i.checked).map(i => i.dataset.rg);
+      const min = Math.max(1, Math.min(10, parseInt($('#cMin', el).value, 10) || 6));
+      await save('roleta', { ...(D().roleta.find(x => x.id === '_config') || {}), id: '_config', roletaRegra: regra, roletaMin: min, roletaEmpresa: up($('#cEmp', el).value) || 'PRAES IMOB' }); toast('Configuração da roleta salva');
+    };
+  }
+  upd(); return null;
+}
+
 // ============================ TAXAS ============================
 function vTaxas(el) {
   const adm = store.isAdmin();
@@ -1451,8 +1659,8 @@ store.onAuth((ok) => {
 });
 document.title = `${EMPRESA} · Controle de Vendas`;
 // ---------- atualização automática: se saiu versão nova, recarrega ----------
-const APP_V = 10;
-const APP_DATA = '29/10/2026';
+const APP_V = 11;
+const APP_DATA = '03/11/2026';
 const DEV = { nome: 'Gustavo Soares', email: 'gstsoares27@gmail.com', zap: '(11) 95448-5216', zapLink: 'https://wa.me/5511954485216' };
 function rodape(versaoServidor) {
   const nova = versaoServidor && Number(versaoServidor) > APP_V;

@@ -1,9 +1,9 @@
 // Camada de dados: Firebase (Auth + Firestore) ou MODO DEMONSTRAÇÃO (localStorage).
 import { firebaseConfig } from './firebase-config.js';
-import { acessoDaVenda, slug } from './calc.js?v=10';
+import { acessoDaVenda, slug } from './calc.js?v=11';
 
 const FB = 'https://www.gstatic.com/firebasejs/10.12.2/';
-export const COLS = ['vendas', 'pessoas', 'regras', 'empreendimentos', 'agendamentos', 'users', 'config'];
+export const COLS = ['vendas', 'pessoas', 'regras', 'empreendimentos', 'agendamentos', 'users', 'config', 'roleta'];
 export const ADMIN = ['admin', 'master', 'diretor'];
 
 export const store = {
@@ -44,6 +44,7 @@ function demoLoad() {
   let db = null;
   try { db = JSON.parse(localStorage.getItem(DKEY) || 'null'); } catch (e) { }
   if (!db) db = demoSeed();
+  COLS.forEach(c => { if (!Array.isArray(db[c])) db[c] = []; });
   return db;
 }
 function demoSave() { try { localStorage.setItem(DKEY, JSON.stringify(store.data)); } catch (e) { } }
@@ -114,7 +115,7 @@ function subscribe() {
     emit();
   }, err => console.error(col, err)));
   ['pessoas', 'regras', 'empreendimentos', 'config'].forEach(c => sub(c, fs.collection(db, c)));
-  if (store.isMaster()) sub('users', fs.collection(db, 'users'));
+  if (store.isMaster()) { sub('users', fs.collection(db, 'users')); sub('roleta', fs.collection(db, 'roleta')); }
   else sub('users', fs.query(fs.collection(db, 'users'), fs.where('ativo', '==', true)));
   const lib = store.empsLiberados();           // null = todos
   const verTudo = store.isMaster() || me.papel === 'diretor';
