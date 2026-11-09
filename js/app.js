@@ -2,8 +2,8 @@ import {
   CARGOS, STATUS, STATUS_VENDA, GRUPOS_FUNIL, FORMAS, statusInfo, slug, isVenda, dataRef, titular, comissoes,
   pendencias, periodo, noPeriodo, iso, addDays, toDate, parcelasDaVenda, gerarParcelas, round2, PRAZO_REPASSE_DIAS,
   participantesDaVenda, taxaDaVenda, cargoLabel, SERIES, IMPOSTO_PADRAO, pagamentosDaVenda
-} from './calc.js?v=12';
-import { store, init, login, logout, save, saveMany, remove, createUser, updateUser, changePassword, resetDemo, resetSenha, limparColecoes, liberarUsuario } from './store.js?v=12';
+} from './calc.js?v=13';
+import { store, init, login, logout, save, saveMany, remove, createUser, updateUser, changePassword, resetDemo, resetSenha, limparColecoes, liberarUsuario } from './store.js?v=13';
 import { EMPRESA } from './firebase-config.js';
 
 // ============================ HELPERS ============================
@@ -48,7 +48,7 @@ const store_get = (k, d) => { try { return JSON.parse(localStorage.getItem('prae
 const store_set = (k, v) => { try { localStorage.setItem('praes_ui_' + k, JSON.stringify(v)); } catch (e) { } };
 
 const D = () => store.data;
-const pessoaPorNome = (n) => D().pessoas.find(p => up(p.nome) === up(n));
+const pessoaPorNome = (n) => { const u = up(n); return D().pessoas.find(p => up(p.nome) === u) || D().pessoas.find(p => (p.aliases || []).map(up).includes(u)); };
 const canon = (n) => { const u = up(n); if (!u) return ''; const p = D().pessoas.find(x => up(x.nome) === u || (x.aliases || []).map(up).includes(u)); return p ? p.nome : u; };
 const IGNORAR = ['TESTE', 'PROVIS.', '?'];
 const userDaPessoa = (n) => n && D().users.find(u => up(u.pessoa) === up(n));
@@ -931,8 +931,8 @@ function vEquipe(el) {
         </details>`).join('')}</div><p class="muted small">O organograma usa os campos "Gerente" e "Diretor" do cadastro de cada pessoa.</p>`;
       return;
     }
-    $('#res', el).innerHTML = `<div class="tbl-wrap"><table><thead><tr><th>Pessoa</th><th>Cargo</th><th>Gerente</th><th>Diretor</th><th>Tipo</th><th>Telefone</th><th>CRECI</th><th class="n">Vendas (total)</th><th class="n">VGV (total)</th><th>Login</th><th>Ativo</th></tr></thead><tbody>
-    ${ps.map(p => { const mv = vs.filter(v => (v.corretor || v.gerente) === p.nome); const u = userDaPessoa(p.nome); return `<tr class="click" data-id="${p.id}"><td><span class="row">${avatar(p.nome, 'sm')} <b>${esc(p.nome)}</b></span></td><td>${esc(p.cargo)}</td><td>${esc(p.gerente)}</td><td>${esc(p.diretor)}</td><td>${esc(p.tipo)}</td><td>${esc(p.telefone)}</td><td>${esc(p.creci)}</td>
+    $('#res', el).innerHTML = `<div class="tbl-wrap"><table><thead><tr><th>Pessoa</th><th>Cargo</th><th>Gerente</th><th>Diretor</th><th>Tipo</th><th>Telefone</th><th>E-mail</th><th>CRECI</th><th class="n">Vendas (total)</th><th class="n">VGV (total)</th><th>Login</th><th>Ativo</th></tr></thead><tbody>
+    ${ps.map(p => { const mv = vs.filter(v => (v.corretor || v.gerente) === p.nome); const u = userDaPessoa(p.nome); return `<tr class="click" data-id="${p.id}"><td><span class="row">${avatar(p.nome, 'sm')} <b>${esc(p.nome)}</b></span></td><td>${esc(p.cargo)}</td><td>${esc(p.gerente)}</td><td>${esc(p.diretor)}</td><td>${esc(p.tipo)}</td><td>${esc(p.telefone)}</td><td>${esc(p.email || '')}</td><td>${esc(p.creci)}</td>
       <td class="n">${mv.length || ''}</td><td class="n">${mv.length ? brl(mv.reduce((s, v) => s + +v.vgv, 0)) : ''}</td><td>${u ? `<span class="tag ok">${esc(u.email || u.usuario)}</span>` : ''}</td><td>${p.ativo === false ? '<span class="tag bad">Inativo</span>' : '<span class="tag ok">Ativo</span>'}</td></tr>`; }).join('')}</tbody></table></div>`;
     $$('tr[data-id]', el).forEach(t => t.onclick = () => abrirPessoa(D().pessoas.find(p => p.id === t.dataset.id)));
   }
@@ -962,7 +962,7 @@ function abrirPessoa(p0) {
     <label>Cargo<select class="in" data-v="cargo" ${dis}>${['DIRETOR', 'GERENTE', 'COORDENADOR', 'CORRETOR', 'IMOBILIÁRIA', 'PARCEIRO'].map(c => `<option ${c === p.cargo ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
     ${inp('gerente', 'Gerente (equipe)', 'text', 'list="dl-p"')}${inp('diretor', 'Diretor', 'text', 'list="dl-p"')}
     <label>Tipo<select class="in" data-v="tipo" ${dis}>${['PF', 'PJ', 'PARCEIRO'].map(c => `<option ${c === p.tipo ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
-    ${inp('nomeCompleto', 'Nome completo')}${inp('telefone', 'Telefone')}${inp('creci', 'CRECI')}${inp('pix', 'Chave PIX')}
+    ${inp('nomeCompleto', 'Nome completo')}${inp('telefone', 'Telefone')}${inp('email', 'E-mail', 'email')}${inp('creci', 'CRECI')}${inp('pix', 'Chave PIX')}
     ${inp('metaVendas', 'Meta mensal (nº vendas)', 'number')}${inp('metaVgv', 'Meta mensal VGV (R$)', 'number')}
     <label>Situação<select class="in" data-v="ativo" ${dis}><option value="true" ${p.ativo !== false ? 'selected' : ''}>Ativo</option><option value="false" ${p.ativo === false ? 'selected' : ''}>Inativo</option></select></label>
   </div>${p0 ? (store.isMaster() ? '<p class="muted small">Pode trocar o nome: ao salvar, o sistema atualiza o nome em todas as vendas, comissões, agendamentos, equipes e roletas dessa pessoa.</p>' : '<p class="muted small">Só o master ou o administrador pode trocar o nome (ele é a ligação com as vendas).</p>') : ''}</div>
@@ -1085,6 +1085,7 @@ const TIPOS_ATEND = ['ESPONTÂNEA', 'INDICAÇÃO SALÃO', 'RETORNO SALÃO', 'IND
 const COR_TIPO = { 'ESPONTÂNEA': '#1e3a6e', 'INDICAÇÃO SALÃO': '#1e3a6e', 'RETORNO SALÃO': '#1e3a6e', 'INDICAÇÃO PARCERIA': '#5b9b4a', 'RETORNO PARCERIA': '#5b9b4a', 'CORTESIA': '#8b93a6', 'PUXADORA': '#8b93a6' };
 const PERIODOS = [['M', 'Manhã'], ['T', 'Tarde']];
 const DIAS_SEM = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+const perLbl = (p) => ({ M: 'Manhã', T: 'Tarde', I: 'Integral' })[p] || p || '';
 const rolCfg = () => { const c = D().roleta.find(x => x.id === '_config') || {}; return { regra: c.roletaRegra || [], min: Number(c.roletaMin) || 6, empresa: c.roletaEmpresa || 'PRAES IMOB' }; };
 const temRegra = (emp) => rolCfg().regra.includes(slug(emp));
 const rolId = (emp, data, per) => `${slug(emp)}_${data}_${per}`;
@@ -1095,7 +1096,11 @@ const rolEmps = () => { const s = new Set(D().empreendimentos.filter(e => e.ativ
 // frequência (seg–sex) de cada corretor num projeto, na semana da data informada
 function frequenciaSemana(emp, data) {
   const seg = segundaDa(data); const f = {};
-  for (let i = 0; i < 5; i++) { const d = addDays(seg, i); PERIODOS.forEach(([p]) => { const r = rolDoc(emp, d, p); (r?.ordem || []).forEach(o => { const k = up(o.nome); (f[k] = f[k] || { nome: o.nome, gerente: o.gerente, diretor: o.diretor, n: 0, marcas: {} }).n++; f[k].marcas[d + p] = true; if (o.gerente) f[k].gerente = o.gerente; }); }); }
+  const reg = (o) => { const k = up(o.nome); const x = (f[k] = f[k] || { nome: o.nome, gerente: o.gerente, diretor: o.diretor, n: 0, fds: 0, marcas: {} }); if (o.gerente) x.gerente = o.gerente; return x; };
+  // seg–sex: manhã e tarde contam períodos para a regra
+  for (let i = 0; i < 5; i++) { const d = addDays(seg, i); PERIODOS.forEach(([p]) => { (rolDoc(emp, d, p)?.ordem || []).forEach(o => { const x = reg(o); x.n++; x.marcas[d + p] = true; }); }); }
+  // sáb e dom: plantão integral (presença no dia; não entra na conta da regra)
+  for (let i = 5; i < 7; i++) { const d = addDays(seg, i); ['I', 'M', 'T'].forEach(p => { (rolDoc(emp, d, p)?.ordem || []).forEach(o => { const x = reg(o); if (!x.marcas[d + 'I']) { x.marcas[d + 'I'] = true; x.fds++; } }); }); }
   return f;
 }
 function aptoTag(emp, data, nome) {
@@ -1115,6 +1120,28 @@ function rolFiltros(F, el, extras = '') {
     <label>Data<input class="in" type="date" data-rf="data" value="${F.data}"></label>${extras}`;
 }
 
+// cadastro rápido de corretor (usado na roleta quando o nome ainda não existe em Corretores / Equipe)
+function cadastroRapido(nome, depois, base = {}) {
+  const b = openModal(`<div class="mh"><h2>Cadastrar ${esc(up(nome))}</h2><button class="x" data-close>×</button></div><div class="mb">${datalists()}
+    <p class="muted small"><b>${esc(up(nome))}</b> ainda não está em Corretores / Equipe. Só entra na roleta quem tem cadastro: confira os dados e salve para cadastrar e lançar agora.</p>
+    <p class="muted small">Se for alguém já cadastrado com outro nome, feche e escolha o nome da lista.</p><div class="form">
+    <label class="s2">Nome / apelido<input class="in" id="cqNome" value="${esc(up(nome))}"></label>
+    <label>Cargo<select class="in" id="cqCargo">${['CORRETOR', 'COORDENADOR', 'GERENTE', 'DIRETOR', 'IMOBILIÁRIA', 'PARCEIRO'].map(c => `<option>${c}</option>`).join('')}</select></label>
+    <label>Gerente (equipe)<input class="in" id="cqGer" list="dl-p" value="${esc(base.gerente || '')}"></label>
+    <label>Diretor<input class="in" id="cqDir" list="dl-p" value="${esc(base.diretor || '')}"></label>
+    <label>Telefone<input class="in" id="cqTel"></label>
+    <label class="s2">E-mail<input class="in" id="cqEmail" type="email"></label></div></div>
+    <div class="mf"><span class="space"></span><button class="btn" data-close>Cancelar</button><button class="btn gold" id="cqOk">Cadastrar${base.nome ? '' : ' e lançar'}</button></div>`, 'sm');
+  $('#cqOk', b).onclick = async () => {
+    const n = up($('#cqNome', b).value); if (!n) return toast('Informe o nome');
+    const ja = pessoaPorNome(n);
+    if (ja) { closeModal(); return depois(ja.nome); }
+    if (base.nome && up(base.nome) !== n) return toast('Para trocar o nome, cadastre com o mesmo nome e depois edite em Corretores / Equipe');
+    await save('pessoas', { nome: n, apelido: n, cargo: $('#cqCargo', b).value, gerente: up($('#cqGer', b).value), diretor: up($('#cqDir', b).value), telefone: $('#cqTel', b).value.trim(), email: $('#cqEmail', b).value.trim(), tipo: 'PF', ativo: true });
+    closeModal(); await depois(n);
+  };
+}
+
 // ---------- 1. Escala do dia ----------
 function vRoleta(el) {
   const F = Object.assign({ emp: '', data: hoje(), per: new Date().getHours() < 13 ? 'M' : 'T' }, store_get('fRol', {}), {});
@@ -1122,27 +1149,31 @@ function vRoleta(el) {
   function salvar(r) { return save('roleta', r); }
   function docAtual() { return rolDoc(F.emp, F.data, F.per) || { id: rolId(F.emp, F.data, F.per), empreendimento: F.emp, data: F.data, periodo: F.per, ordem: [], vez: 0, atendimentos: [] }; }
   function upd() {
+    const fds0 = fimDeSemana(F.data); if (fds0 && F.per !== 'I' && !rolDoc(F.emp, F.data, F.per)?.ordem?.length) F.per = 'I'; if (!fds0 && F.per === 'I') F.per = new Date().getHours() < 13 ? 'M' : 'T';
     const r = docAtual(); const n = r.ordem.length; const vez = n ? (r.vez || 0) % n : 0;
     const fds = fimDeSemana(F.data); const regra = temRegra(F.emp);
-    const outro = rolDoc(F.emp, F.data, F.per === 'M' ? 'T' : 'M');
+    // fim de semana = plantão integral (M/T só aparecem se já houver lançamento antigo nesse formato)
+    const opts = fds ? [['I', 'Integral'], ...PERIODOS.filter(([p]) => rolDoc(F.emp, F.data, p)?.ordem?.length).map(([p, l]) => [p, l + ' (lançamento antigo)'])] : PERIODOS;
+    if (!opts.some(([k]) => k === F.per)) F.per = fds ? 'I' : (new Date().getHours() < 13 ? 'M' : 'T');
+    const outro = fds ? null : rolDoc(F.emp, F.data, F.per === 'M' ? 'T' : 'M');
     const dia = DIAS_SEM[toDate(F.data).getDay()];
-    el.innerHTML = `<div class="filters">${rolFiltros(F, el, `<label>Período<select class="in" data-rf="per">${PERIODOS.map(([k, l]) => `<option value="${k}" ${F.per === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>`)}
+    el.innerHTML = `<div class="filters">${rolFiltros(F, el, `<label>Período<select class="in" data-rf="per">${opts.map(([k, l]) => `<option value="${k}" ${F.per === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>`)}
       <span class="space"></span><span class="muted small">${dia} · ${regra ? `<span class="tag warn">regra de frequência: ${rolCfg().min} períodos seg–sex</span>` : '<span class="tag">projeto sem regra de frequência</span>'}</span></div>
       ${fds && regra ? `<div class="aviso-cob">Fim de semana com regra de frequência: cada corretor mostra se está <b>apto</b> (${rolCfg().min} períodos na semana neste projeto). Você pode escalar qualquer um mesmo assim.</div>` : ''}
       <div class="cols2 rol-cols">
-      <div class="card"><h3>Roleta · ${esc(F.emp)} · ${fd(F.data)} · ${F.per === 'M' ? 'Manhã' : 'Tarde'} <small>${n} corretor(es)</small></h3>
+      <div class="card"><h3>Roleta · ${esc(F.emp)} · ${fd(F.data)} · ${perLbl(F.per)} <small>${n} corretor(es)</small></h3>
         <div class="row mt" style="flex-wrap:wrap;gap:8px">${datalists()}
-          <input class="in" id="rAdd" list="dl-p" placeholder="Próximo da lista da obra (ou ex.: POS BARRA)" style="flex:1;min-width:200px">
+          <input class="in" id="rAdd" list="dl-p" placeholder="Próximo da lista da obra (nome cadastrado na equipe)" style="flex:1;min-width:200px" autocomplete="off">
           <button class="btn gold" id="rAddBt" type="button">+ Adicionar</button>
           ${outro?.ordem?.length && !n ? `<button class="btn" id="rCopia" type="button">Copiar da ${F.per === 'M' ? 'tarde' : 'manhã'} (${outro.ordem.length})</button>` : ''}
         </div>
-        <div class="tbl-wrap mt"><table class="rol-tb"><thead><tr><th class="n">Nº</th><th>Corretor</th><th>Gerente</th><th>Diretoria</th><th>Empresa</th><th>Frequência semana</th><th class="n">Atend.</th><th></th></tr></thead><tbody>
-        ${r.ordem.map((o, i) => `<tr class="${i === vez ? 'vez' : ''}"><td class="n"><b>${i + 1}</b></td><td><b>${esc(o.nome)}</b>${i === vez ? ' <span class="tag ok">da vez</span>' : ''}</td>
+        <div class="tbl-wrap mt"><table class="rol-tb"><thead><tr><th class="n">Nº</th><th>Corretor</th><th>Ações</th><th>Gerente</th><th>Diretoria</th><th>Empresa</th><th>Frequência semana</th><th class="n">Atend.</th></tr></thead><tbody>
+        ${r.ordem.map((o, i) => `<tr class="${i === vez ? 'vez' : ''}"><td class="n"><b>${i + 1}</b></td><td><b>${esc(o.nome)}</b>${i === vez ? ' <span class="tag ok">da vez</span>' : ''}${pessoaPorNome(o.nome) ? '' : ` <button class="btn sm" data-cad="${i}" type="button" title="Este nome não está em Corretores / Equipe">sem cadastro · cadastrar</button>`}</td>
+          <td class="row rol-acoes" style="flex-wrap:nowrap;gap:4px"><button class="btn sm danger" data-rm="${i}" title="Excluir da roleta deste período">× Excluir</button><button class="btn sm" data-up="${i}" ${i ? '' : 'disabled'} title="Subir">↑</button><button class="btn sm" data-dn="${i}" ${i < n - 1 ? '' : 'disabled'} title="Descer">↓</button><button class="btn sm" data-vz="${i}" title="Passar a vez para este">▶</button></td>
           <td><input class="in sm" data-ed="gerente" data-i="${i}" value="${esc(o.gerente || '')}" list="dl-p"></td><td><input class="in sm" data-ed="diretor" data-i="${i}" value="${esc(o.diretor || '')}" list="dl-p"></td><td><input class="in sm" data-ed="empresa" data-i="${i}" value="${esc(o.empresa || '')}"></td>
-          <td>${aptoTag(F.emp, F.data, o.nome)}</td><td class="n">${(r.atendimentos || []).filter(a => up(a.nome) === up(o.nome)).length}</td>
-          <td class="row" style="flex-wrap:nowrap;gap:4px"><button class="btn sm" data-up="${i}" ${i ? '' : 'disabled'} title="Subir">↑</button><button class="btn sm" data-dn="${i}" ${i < n - 1 ? '' : 'disabled'} title="Descer">↓</button><button class="btn sm" data-vz="${i}" title="Passar a vez para este">▶</button><button class="btn sm danger" data-rm="${i}" title="Tirar da roleta">×</button></td></tr>`).join('') || '<tr><td colspan="8" class="empty">Ninguém na roleta ainda. Lance os corretores na ordem do sorteio feito pela obra (1º, 2º, 3º...).</td></tr>'}
+          <td>${aptoTag(F.emp, F.data, o.nome)}</td><td class="n">${(r.atendimentos || []).filter(a => up(a.nome) === up(o.nome)).length}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">Ninguém na roleta ainda. Lance os corretores na ordem do sorteio feito pela obra (1º, 2º, 3º...).</td></tr>'}
         </tbody></table></div>
-        <p class="muted small mt">Lance na mesma ordem do resultado do sorteio da obra; use ↑ ↓ para corrigir. Cada corretor na roleta conta 1 período de frequência (${F.per === 'M' ? 'manhã' : 'tarde'} de ${fd(F.data)}) neste projeto. Edite gerente, diretoria e empresa direto na linha.</p></div>
+        <p class="muted small mt">Lance na mesma ordem do resultado do sorteio da obra; use ↑ ↓ para corrigir. ${fds ? `Fim de semana é plantão integral: o corretor aparece como presente no ${dia.toLowerCase()} na frequência.` : `Cada corretor na roleta conta 1 período de frequência (${perLbl(F.per).toLowerCase()} de ${fd(F.data)}) neste projeto.`} Só entra quem está cadastrado em Corretores / Equipe. Edite gerente, diretoria e empresa direto na linha.</p></div>
       <div class="rol-lado" style="display:flex;flex-direction:column;gap:14px">
         <div class="card vez-card">${n ? `<div class="muted small">PRÓXIMO A ATENDER</div><div class="vez-nome">${esc(r.ordem[vez].nome)}</div><div class="muted small">${esc(r.ordem[vez].gerente || '')}${r.ordem[vez].diretor ? ' · ' + esc(r.ordem[vez].diretor) : ''}</div>
           <div class="row mt" style="gap:8px;flex-wrap:wrap"><button class="btn gold" id="rAtender" type="button">Chegou cliente → registrar atendimento</button><button class="btn" id="rPular" type="button">Pular a vez</button></div>
@@ -1151,7 +1182,12 @@ function vRoleta(el) {
           <div class="lst-at">${(r.atendimentos || []).slice().reverse().map(a => `<div class="at"><span class="at-tipo" style="background:${COR_TIPO[a.tipo] || '#555'}">${esc(a.tipo)}</span><div style="flex:1;min-width:0"><b>${esc(a.nome)}</b> <span class="muted small">${esc(a.hora || '')} · ${esc(a.gerente || '')}</span>${a.cliente ? `<div class="small">${esc(a.cliente)}</div>` : ''}${a.obs ? `<div class="muted small">${esc(a.obs)}</div>` : ''}</div><button class="btn sm danger" data-atdel="${esc(a.id)}" title="Apagar atendimento">×</button></div>`).join('') || '<div class="muted small">Nenhum atendimento ainda.</div>'}</div></div>
       </div></div>`;
     $$('[data-rf]', el).forEach(i => i.onchange = () => { F[i.dataset.rf] = i.value; store_set('fRol', { emp: F.emp, per: F.per }); upd(); });
-    const add = async () => { const v = up($('#rAdd', el).value); if (!v) return; const r2 = docAtual(); if (r2.ordem.some(o => up(o.nome) === v)) return toast('Já está na roleta'); r2.ordem = [...r2.ordem, rolPessoa(v)]; await salvar(r2); };
+    const lanca = async (nome) => { const r2 = docAtual(); if (r2.ordem.some(o => up(o.nome) === up(nome))) return toast('Já está na roleta'); r2.ordem = [...r2.ordem, rolPessoa(nome)]; await salvar(r2); };
+    const add = async () => { const v = up($('#rAdd', el).value); if (!v) return; const p = pessoaPorNome(v);
+      if (p && p.ativo === false) return toast(`${p.nome} está inativo em Corretores / Equipe. Reative o cadastro para lançar.`);
+      if (p) return lanca(p.nome);
+      cadastroRapido(v, async (nome) => { await lanca(nome); }); };
+    $$('[data-cad]', el).forEach(b => b.onclick = () => { const o = r.ordem[+b.dataset.cad]; cadastroRapido(o.nome, async () => { toast('Cadastro criado'); }, o); });
     $('#rAddBt', el).onclick = add; $('#rAdd', el).onkeydown = (e) => { if (e.key === 'Enter') add(); };
     $('#rCopia', el) && ($('#rCopia', el).onclick = async () => { await salvar({ ...docAtual(), ordem: outro.ordem.map(o => ({ ...o })), vez: 0 }); toast('Lista copiada. Ajuste a ordem com as setas se precisar.'); });
     const mexe = async (fn) => { const r2 = JSON.parse(JSON.stringify(docAtual())); fn(r2); await salvar(r2); };
@@ -1178,7 +1214,7 @@ function vRoleta(el) {
         closeModal(); toast('Atendimento registrado');
       };
     });
-    $('#bRolPdf').onclick = () => { const rr = docAtual(); gerarPDF({ titulo: 'Roleta de plantão', nome: `roleta_${slug(F.emp)}_${F.data}_${F.per}`, orient: 'portrait', sub: `${F.emp} · ${dia} ${fd(F.data)} · ${F.per === 'M' ? 'Manhã' : 'Tarde'}`,
+    $('#bRolPdf').onclick = () => { const rr = docAtual(); gerarPDF({ titulo: 'Roleta de plantão', nome: `roleta_${slug(F.emp)}_${F.data}_${F.per}`, orient: 'portrait', sub: `${F.emp} · ${dia} ${fd(F.data)} · ${perLbl(F.per)}`,
       resumo: [['Corretores', String(rr.ordem.length)], ['Atendimentos', String((rr.atendimentos || []).length)]],
       tabelas: [{ titulo: 'Ordem da roleta', cols: [['n', 'Nº'], ['nome', 'Corretor'], ['gerente', 'Gerente'], ['diretor', 'Diretoria'], ['empresa', 'Empresa'], ['fq', 'Frequência']], rows: rr.ordem.map((o, i) => ({ n: i + 1, ...o, fq: aptoTag(F.emp, F.data, o.nome).replace(/<[^>]+>/g, '') })) },
         { titulo: 'Atendimentos', cols: [['hora', 'Hora'], ['nome', 'Corretor'], ['gerente', 'Gerente'], ['tipo', 'Tipo'], ['cliente', 'Cliente'], ['obs', 'Observação']], rows: rr.atendimentos || [] }] }); };
@@ -1192,27 +1228,27 @@ function vRolFreq(el) {
   $('#topActions').innerHTML = '<button class="btn" id="bFqPdf">PDF</button><button class="btn" id="bFqXls">Excel</button>';
   let exp = [];
   function upd() {
-    const seg = segundaDa(F.data); const dias = [0, 1, 2, 3, 4].map(i => addDays(seg, i)); const { min } = rolCfg();
+    const seg = segundaDa(F.data); const dias = [0, 1, 2, 3, 4, 5, 6].map(i => addDays(seg, i)); const { min } = rolCfg(); const pers = (d) => fimDeSemana(d) ? [['I', 'Integral']] : PERIODOS;
     const es = rolEmps(); const lista = F.emp === '__todos' ? es : [F.emp];
     exp = [];
     const blocos = lista.map(emp => {
       const f = Object.values(frequenciaSemana(emp, seg)).sort((a, b) => b.n - a.n || a.nome.localeCompare(b.nome));
       if (!f.length) return '';
       const regra = temRegra(emp);
-      f.forEach(x => exp.push({ PROJETO: emp, CORRETOR: x.nome, GERENTE: x.gerente || '', ...Object.fromEntries(dias.flatMap(d => PERIODOS.map(([p, l]) => [`${DIAS_SEM[toDate(d).getDay()]} ${l}`, x.marcas[d + p] ? 1 : 0]))), TOTAL: x.n, SITUACAO: regra ? (x.n >= min ? 'APTO' : 'NÃO APTO') : 'SEM REGRA' }));
+      f.forEach(x => exp.push({ PROJETO: emp, CORRETOR: x.nome, GERENTE: x.gerente || '', ...Object.fromEntries(dias.flatMap(d => pers(d).map(([p, l]) => [`${DIAS_SEM[toDate(d).getDay()]} ${l}`, x.marcas[d + p] ? 1 : 0]))), 'TOTAL SEG-SEX': x.n, 'SÁB/DOM': x.fds, SITUACAO: regra ? (x.n >= min ? 'APTO' : 'NÃO APTO') : 'SEM REGRA' }));
       return `<div class="card mt"><h3>${esc(emp)} ${regra ? `<span class="tag warn">regra: ${min} períodos</span>` : '<span class="tag">sem regra de frequência</span>'} <small>${f.length} corretor(es)</small></h3>
-        <div class="tbl-wrap"><table class="freq-tb"><thead><tr><th>Corretor</th><th>Gerente</th>${dias.map(d => `<th class="c" colspan="2">${DIAS_SEM[toDate(d).getDay()]} ${fd(d).slice(0, 5)}</th>`).join('')}<th class="n">Total</th><th>Fim de semana</th></tr>
-          <tr class="sub"><th></th><th></th>${dias.map(() => '<th class="c">M</th><th class="c">T</th>').join('')}<th></th><th></th></tr></thead><tbody>
-        ${f.map(x => `<tr><td><b>${esc(x.nome)}</b></td><td>${esc(x.gerente || '')}</td>${dias.map(d => PERIODOS.map(([p]) => `<td class="c">${x.marcas[d + p] ? '<span class="dot ok" title="presente">●</span>' : '<span class="dot">·</span>'}</td>`).join('')).join('')}
-          <td class="n"><b>${x.n}</b></td><td>${regra ? (x.n >= min ? '<span class="tag ok">apto</span>' : `<span class="tag bad">não apto · falta ${min - x.n}</span>`) : '<span class="tag">livre (sem regra)</span>'}</td></tr>`).join('')}</tbody></table></div></div>`;
+        <div class="tbl-wrap"><table class="freq-tb"><thead><tr><th>Corretor</th><th>Gerente</th>${dias.map(d => `<th class="c ${fimDeSemana(d) ? 'fds' : ''}" colspan="${pers(d).length}">${DIAS_SEM[toDate(d).getDay()]} ${fd(d).slice(0, 5)}</th>`).join('')}<th class="n" title="Períodos de segunda a sexta (contam para a regra)">Seg–sex</th><th class="n" title="Dias de plantão no sábado e domingo">Sáb/Dom</th><th>Fim de semana</th></tr>
+          <tr class="sub"><th></th><th></th>${dias.map(d => fimDeSemana(d) ? '<th class="c fds">Int.</th>' : '<th class="c">M</th><th class="c">T</th>').join('')}<th></th><th></th><th></th></tr></thead><tbody>
+        ${f.map(x => `<tr><td><b>${esc(x.nome)}</b></td><td>${esc(x.gerente || '')}</td>${dias.map(d => pers(d).map(([p]) => `<td class="c ${fimDeSemana(d) ? 'fds' : ''}">${x.marcas[d + p] ? '<span class="dot ok" title="presente">●</span>' : '<span class="dot">·</span>'}</td>`).join('')).join('')}
+          <td class="n"><b>${x.n}</b></td><td class="n">${x.fds || ''}</td><td>${regra ? (x.n >= min ? '<span class="tag ok">apto</span>' : `<span class="tag bad">não apto · falta ${min - x.n}</span>`) : '<span class="tag">livre (sem regra)</span>'}</td></tr>`).join('')}</tbody></table></div></div>`;
     }).join('');
     el.innerHTML = `<div class="filters"><label>Projeto<select class="in" data-rf="emp"><option value="__todos">Todos os projetos</option>${es.map(n => `<option ${n === F.emp ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></label>
-      <label>Semana de<input class="in" type="date" data-rf="data" value="${F.data}"></label><span class="space"></span><span class="muted small">Segunda ${fd(seg)} a sexta ${fd(addDays(seg, 4))} · cada manhã ou tarde na roleta = 1 período</span></div>
+      <label>Semana de<input class="in" type="date" data-rf="data" value="${F.data}"></label><span class="space"></span><span class="muted small">Segunda ${fd(seg)} a domingo ${fd(addDays(seg, 6))} · seg–sex: cada manhã ou tarde = 1 período · sáb e dom: plantão integral</span></div>
       ${blocos || '<div class="card mt"><div class="empty">Nenhuma roleta lançada nesta semana.</div></div>'}`;
     $$('[data-rf]', el).forEach(i => i.onchange = () => { F[i.dataset.rf] = i.value; store_set('fRolF', F); upd(); });
   }
   $('#bFqXls').onclick = () => exp.length ? exportXlsx(exp, 'frequencia_' + segundaDa(F.data)) : toast('Nada para exportar');
-  $('#bFqPdf').onclick = () => { if (!exp.length) return toast('Nada para exportar'); const seg = segundaDa(F.data); gerarPDF({ titulo: 'Frequência da semana', nome: 'frequencia_' + seg, sub: `Semana ${fd(seg)} a ${fd(addDays(seg, 4))} · mínimo ${rolCfg().min} períodos nos projetos com regra`, cols: Object.keys(exp[0]).map(k => [k, k.replace('Manhã', 'M').replace('Tarde', 'T')]), rows: exp }); };
+  $('#bFqPdf').onclick = () => { if (!exp.length) return toast('Nada para exportar'); const seg = segundaDa(F.data); gerarPDF({ titulo: 'Frequência da semana', nome: 'frequencia_' + seg, sub: `Semana ${fd(seg)} a ${fd(addDays(seg, 6))} · mínimo ${rolCfg().min} períodos de seg a sex nos projetos com regra`, orient: 'landscape', cols: Object.keys(exp[0]).map(k => [k, k.replace('Manhã', 'M').replace('Tarde', 'T').replace('Integral', 'Int.')]), rows: exp }); };
   upd(); return upd;
 }
 
@@ -1226,15 +1262,15 @@ function vRolFech(el) {
     const es = rolEmps(); if (F.emp !== '__todos' && !es.includes(F.emp)) F.emp = '__todos';
     const todos = F.emp === '__todos';
     const ate = F.ate && F.ate >= F.data ? F.ate : F.data;
-    const pers = F.per === 'D' ? ['M', 'T'] : [F.per];
+    const pers = F.per === 'D' ? ['M', 'T', 'I'] : [F.per];
     const docs = D().roleta.filter(r => r.ordem && r.data >= F.data && r.data <= ate && pers.includes(r.periodo) && (todos || r.empreendimento === F.emp))
       .sort((a, b) => (a.data + a.empreendimento + a.periodo).localeCompare(b.data + b.empreendimento + b.periodo));
     const umDia = ate === F.data;
     const lblData = umDia ? `${DIAS_SEM[toDate(F.data).getDay()]} · ${fd(F.data)}` : `${fd(F.data)} a ${fd(ate)}`;
-    const lblPer = F.per === 'D' ? (umDia ? 'Dia todo' : 'Manhã e tarde') : F.per === 'M' ? 'Manhã' : 'Tarde';
+    const lblPer = F.per === 'D' ? (umDia ? 'Dia todo' : 'Todos os períodos') : perLbl(F.per);
     el.innerHTML = `<div class="filters"><label>Projeto<select class="in" data-rf="emp"><option value="__todos" ${todos ? 'selected' : ''}>Todos os projetos (visão geral)</option>${es.map(n => `<option ${n === F.emp ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></label>
       <label>Data<input class="in" type="date" data-rf="data" value="${F.data}"></label><label>Até (opcional)<input class="in" type="date" data-rf="ate" value="${F.ate || ''}"></label>
-      <label>Período<select class="in" data-rf="per">${[['D', 'Dia todo'], ...PERIODOS].map(([k, l]) => `<option value="${k}" ${F.per === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      <label>Período<select class="in" data-rf="per">${[['D', 'Dia todo'], ...PERIODOS, ['I', 'Integral (sáb/dom)']].map(([k, l]) => `<option value="${k}" ${F.per === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       ${F.ate ? '<button class="btn sm" id="fxLimpa" type="button">Só um dia</button>' : ''}</div><div id="fxr"></div>`;
     $$('[data-rf]', el).forEach(i => i.onchange = () => { F[i.dataset.rf] = i.value; store_set('fRolX', F); upd(); });
     $('#fxLimpa', el) && ($('#fxLimpa', el).onclick = () => { F.ate = ''; store_set('fRolX', F); upd(); });
@@ -1264,13 +1300,13 @@ function vRolFech(el) {
       <div class="mt"><div class="card"><h3>Atendimentos <small>${ats.length}</small></h3><div class="tbl-wrap"><table><thead><tr>${umDia ? '' : '<th>Data</th>'}${todos ? '<th>Projeto</th>' : ''}<th>Hora</th><th>Corretor</th><th>Gerente</th><th>Diretoria</th><th>Atendimento</th><th>Observações</th></tr></thead><tbody>
           ${ats.sort((a, b) => (a.data + (a.hora || '')).localeCompare(b.data + (b.hora || ''))).map(a => `<tr>${umDia ? '' : `<td>${fd(a.data)}</td>`}${todos ? `<td>${esc(a.projeto)}</td>` : ''}<td>${esc(a.hora || '')}</td><td><b>${esc(a.nome)}</b></td><td>${esc(a.gerente || '')}</td><td>${esc(a.diretor || '')}</td><td><span class="at-tipo" style="background:${COR_TIPO[a.tipo] || '#555'}">${esc(a.tipo)}</span></td><td>${esc([a.cliente, a.obs].filter(Boolean).join(' · '))}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">Nenhum atendimento</td></tr>'}</tbody></table></div></div></div>
       <div class="card mt"><h3>Ordem da roleta</h3><div class="tbl-wrap" style="max-height:60vh"><table><thead><tr>${umDia ? '' : '<th>Data</th>'}${todos ? '<th>Projeto</th>' : ''}<th>Período</th><th class="n">Nº</th><th>Corretor</th><th>Gerente</th><th>Diretoria</th><th>Empresa de vendas</th></tr></thead><tbody>
-        ${docs.flatMap(d => d.ordem.map((o, i) => `<tr>${umDia ? '' : `<td>${fd(d.data)}</td>`}${todos ? `<td>${esc(d.empreendimento)}</td>` : ''}<td>${d.periodo === 'M' ? 'Manhã' : 'Tarde'}</td><td class="n">${i + 1}</td><td><b>${esc(o.nome)}</b></td><td>${esc(o.gerente || '')}</td><td>${esc(o.diretor || '')}</td><td>${esc(o.empresa || '')}</td></tr>`)).join('') || '<tr><td colspan="8" class="empty">Sem roleta lançada</td></tr>'}</tbody></table></div></div>`;
+        ${docs.flatMap(d => d.ordem.map((o, i) => `<tr>${umDia ? '' : `<td>${fd(d.data)}</td>`}${todos ? `<td>${esc(d.empreendimento)}</td>` : ''}<td>${perLbl(d.periodo)}</td><td class="n">${i + 1}</td><td><b>${esc(o.nome)}</b></td><td>${esc(o.gerente || '')}</td><td>${esc(o.diretor || '')}</td><td>${esc(o.empresa || '')}</td></tr>`)).join('') || '<tr><td colspan="8" class="empty">Sem roleta lançada</td></tr>'}</tbody></table></div></div>`;
     $$('tr[data-proj]', el).forEach(t => t.onclick = () => { F.emp = t.dataset.proj; store_set('fRolX', F); upd(); window.scrollTo(0, 0); });
     const pal = ['#6aa84f', '#3c78d8', '#e69138', '#a64d79', '#45818e', '#cc4125', '#8e7cc3', '#bf9000', '#76a5af', '#999999'];
     const pie = (id, arr) => { const a = arr.filter(x => x.v > 0); if (!a.length) { $(id, el).parentElement.innerHTML = '<div class="empty">Sem dados</div>'; return; } chart($(id, el), { type: 'pie', data: { labels: a.map(x => x.l), datasets: [{ data: a.map(x => x.v), backgroundColor: a.map((_, i) => pal[i % pal.length]), borderColor: temaAtual() === 'dark' ? '#1b1b1e' : '#fff' }] }, options: { maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10 } } }, tooltip: { callbacks: { label: c => ` ${c.label}: ${c.raw} (${(c.raw / a.reduce((s, x) => s + x.v, 0) * 100).toFixed(1).replace('.', ',')}%)` } } } } }); };
     pie('#pA', porG.map(x => ({ l: x.g, v: x.at }))); pie('#pE', porG.map(x => ({ l: x.g, v: x.esc })));
     const tit = todos ? 'Todos os projetos' : F.emp;
-    xls = ats.map(a => ({ DATA: fd(a.data), PROJETO: a.projeto, PERIODO: a.periodo === 'M' ? 'MANHÃ' : 'TARDE', HORA: a.hora || '', CORRETOR: a.nome, GERENTE: a.gerente || '', DIRETORIA: a.diretor || '', EMPRESA: a.empresa || '', ATENDIMENTO: a.tipo, CLIENTE: a.cliente || '', OBS: a.obs || '' }));
+    xls = ats.map(a => ({ DATA: fd(a.data), PROJETO: a.projeto, PERIODO: up(perLbl(a.periodo)), HORA: a.hora || '', CORRETOR: a.nome, GERENTE: a.gerente || '', DIRETORIA: a.diretor || '', EMPRESA: a.empresa || '', ATENDIMENTO: a.tipo, CLIENTE: a.cliente || '', OBS: a.obs || '' }));
     pdf = { titulo: 'Fechamento da roleta', nome: `fechamento_${todos ? 'todos' : slug(F.emp)}_${F.data}${umDia ? '' : '_' + ate}`, orient: todos ? 'landscape' : 'portrait', sub: `${tit} · ${lblData} · ${lblPer}`,
       resumo: [['Atendimentos', String(ats.length)], ['Corretores na roleta', String(corretores.length)], ...(todos ? [['Projetos', String(projs.length)]] : [])],
       tabelas: [
@@ -1278,7 +1314,7 @@ function vRolFech(el) {
         { titulo: 'Gerentes', cols: [['g', 'Gerente'], ['esc', 'Na roleta', 'n'], ['at', 'Atendimentos', 'n']], rows: porG, totais: { esc: corretores.length, at: ats.length } },
         { titulo: 'Tipos de atendimento', cols: [['t', 'Tipo'], ['n', 'Quantidade', 'n']], rows: porT, totais: { n: ats.length } },
         { titulo: 'Atendimentos', cols: [...(umDia ? [] : [['d', 'Data']]), ...(todos ? [['projeto', 'Projeto']] : []), ['hora', 'Hora'], ['nome', 'Corretor'], ['gerente', 'Gerente'], ['diretor', 'Diretoria'], ['tipo', 'Atendimento'], ['obs', 'Observações']], rows: ats.map(a => ({ ...a, d: fd(a.data), obs: [a.cliente, a.obs].filter(Boolean).join(' · ') })) },
-        { titulo: 'Ordem da roleta', cols: [...(umDia ? [] : [['d', 'Data']]), ...(todos ? [['projeto', 'Projeto']] : []), ['p', 'Período'], ['n', 'Nº'], ['nome', 'Corretor'], ['gerente', 'Gerente'], ['diretor', 'Diretoria'], ['empresa', 'Empresa de vendas']], rows: docs.flatMap(d => d.ordem.map((o, i) => ({ d: fd(d.data), projeto: d.empreendimento, p: d.periodo === 'M' ? 'Manhã' : 'Tarde', n: i + 1, ...o }))) }] };
+        { titulo: 'Ordem da roleta', cols: [...(umDia ? [] : [['d', 'Data']]), ...(todos ? [['projeto', 'Projeto']] : []), ['p', 'Período'], ['n', 'Nº'], ['nome', 'Corretor'], ['gerente', 'Gerente'], ['diretor', 'Diretoria'], ['empresa', 'Empresa de vendas']], rows: docs.flatMap(d => d.ordem.map((o, i) => ({ d: fd(d.data), projeto: d.empreendimento, p: perLbl(d.periodo), n: i + 1, ...o }))) }] };
   }
   $('#bFxPdf').onclick = () => pdf && gerarPDF(pdf);
   $('#bFxXls').onclick = () => xls.length ? exportXlsx(xls, 'atendimentos_roleta_' + F.data) : toast('Nenhum atendimento para exportar');
@@ -1704,8 +1740,8 @@ store.onAuth((ok) => {
 });
 document.title = `${EMPRESA} · Controle de Vendas`;
 // ---------- atualização automática: se saiu versão nova, recarrega ----------
-const APP_V = 12;
-const APP_DATA = '03/11/2026';
+const APP_V = 13;
+const APP_DATA = '09/11/2026';
 const DEV = { nome: 'Gustavo Soares', email: 'gstsoares27@gmail.com', zap: '(11) 95448-5216', zapLink: 'https://wa.me/5511954485216' };
 function rodape(versaoServidor) {
   const nova = versaoServidor && Number(versaoServidor) > APP_V;
