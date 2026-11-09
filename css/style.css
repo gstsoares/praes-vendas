@@ -378,3 +378,15 @@ nav a.sub{padding-left:26px;font-size:13.5px}
 .freq-tb th.fds,.freq-tb td.fds{background:rgba(201,162,74,.10)}
 .rol-tb .in.sm{min-width:90px;width:110px}
 .rol-acoes .btn{white-space:nowrap}
+/* menu lateral em grupos suspensos */
+nav .grp{margin:2px 0}
+nav .grp-h{all:unset;box-sizing:border-box;width:100%;display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;color:#bbb;font-weight:600;cursor:pointer;margin-bottom:2px}
+nav .grp-h:hover{background:var(--side2);color:#fff}
+nav .grp-h:focus-visible{outline:2px solid var(--gold)}
+nav .grp-h .ic{width:20px;text-align:center;opacity:.9}
+nav .grp-h .car{margin-left:auto;font-size:12px;opacity:.7;transition:transform .2s;transform:rotate(-90deg)}
+nav .grp.open>.grp-h .car{transform:none}
+nav .grp.open>.grp-h{color:#fff}
+nav .grp-b{display:none;border-left:1px solid #2e2d33;margin-left:21px;padding-left:4px}
+nav .grp.open>.grp-b{display:block}
+nav .grp-b a.sub{padding-left:12px}
