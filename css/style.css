@@ -375,3 +375,6 @@ nav a.sub{padding-left:26px;font-size:13.5px}
 @media (max-width:760px){ .fech-head{grid-template-columns:1fr} .vez-nome{font-size:28px} }
 .rol-cols{grid-template-columns:1.6fr 1fr}
 @media (max-width:980px){ .rol-cols{grid-template-columns:1fr} .rol-lado{order:-1} }
+.freq-tb th.fds,.freq-tb td.fds{background:rgba(201,162,74,.10)}
+.rol-tb .in.sm{min-width:90px;width:110px}
+.rol-acoes .btn{white-space:nowrap}
