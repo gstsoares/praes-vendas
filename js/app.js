@@ -2,8 +2,8 @@ import {
   CARGOS, STATUS, STATUS_VENDA, GRUPOS_FUNIL, FORMAS, statusInfo, slug, isVenda, dataRef, titular, comissoes,
   pendencias, periodo, noPeriodo, iso, addDays, toDate, parcelasDaVenda, gerarParcelas, round2, PRAZO_REPASSE_DIAS,
   participantesDaVenda, taxaDaVenda, cargoLabel, SERIES, IMPOSTO_PADRAO, pagamentosDaVenda
-} from './calc.js?v=13';
-import { store, init, login, logout, save, saveMany, remove, createUser, updateUser, changePassword, resetDemo, resetSenha, limparColecoes, liberarUsuario } from './store.js?v=13';
+} from './calc.js?v=14';
+import { store, init, login, logout, save, saveMany, remove, createUser, updateUser, changePassword, resetDemo, resetSenha, limparColecoes, liberarUsuario } from './store.js?v=14';
 import { EMPRESA } from './firebase-config.js';
 
 // ============================ HELPERS ============================
@@ -249,13 +249,32 @@ const ROUTES = [
 let route = 'painel', refresh = null;
 const allowed = (r) => !(r.master && !store.isMaster()) && !(r.admin && !store.isAdmin()) && !(r.dono && !store.isDono());
 
+// menu lateral: itens depois de um "sep" formam um grupo suspenso (clique no título abre/fecha)
+const NAV_IC = { Roleta: '◎', Cadastros: '☺', 'Administração': '⚙', Conta: '◉' };
+function navAbertos() { try { return new Set(JSON.parse(localStorage.getItem('praes_nav') || '[]')); } catch (e) { return new Set(); } }
+function navHtml() {
+  const badge = (r) => (r.id === 'liberacoes' || (r.id === 'usuarios' && !store.isDono())) && D().users.some(u => u.pendente) ? `<span class="nbadge">${D().users.filter(u => u.pendente).length}</span>` : '';
+  const item = (r, sub) => `<a data-r="${r.id}" class="${route === r.id ? 'on' : ''}${sub ? ' sub' : ''}"><span class="ic">${r.ic}</span>${r.label}${badge(r)}</a>`;
+  const grupos = []; let g = null;
+  for (const r of ROUTES) { if (r.sep) { g = { sep: r.sep, ok: allowed(r), itens: [] }; grupos.push(g); } else if (allowed(r)) { if (g) g.itens.push(r); else grupos.push({ itens: [r] }); } }
+  const ab = navAbertos();
+  return grupos.map(x => {
+    if (!x.sep) return x.itens.map(r => item(r)).join('');
+    if (!x.ok || !x.itens.length) return '';
+    if (x.itens.length === 1) return item(x.itens[0]); // grupo de um item só (ex.: Meu perfil) fica direto
+    const aberto = ab.has(x.sep) || x.itens.some(r => r.id === route);
+    const pend = x.itens.reduce((n, r) => n + (badge(r) ? D().users.filter(u => u.pendente).length : 0), 0);
+    return `<div class="grp ${aberto ? 'open' : ''}"><button type="button" class="grp-h" data-g="${esc(x.sep)}" aria-expanded="${aberto}"><span class="ic">${NAV_IC[x.sep] || '▸'}</span>${esc(x.sep)}${pend && !aberto ? `<span class="nbadge">${pend}</span>` : ''}<span class="car">▾</span></button><div class="grp-b">${x.itens.map(r => item(r, true)).join('')}</div></div>`;
+  }).join('');
+}
 function renderShell() {
   const me = store.me;
   $('#sideAvatar').outerHTML = `<div id="sideAvatar">${avatar(me, 'xl')}</div>`;
   $('#sideName').textContent = me.nome || me.email;
   $('#sideRole').textContent = PAPEIS[me.papel] || me.papel;
-  $('#nav').innerHTML = ROUTES.filter(allowed).map(r => r.sep ? `<div class="sep">${r.sep}</div>` : `<a data-r="${r.id}" class="${route === r.id ? 'on' : ''}${r.sub ? ' sub' : ''}"><span class="ic">${r.ic}</span>${r.label}${(r.id === 'liberacoes' || (r.id === 'usuarios' && !store.isDono())) && D().users.some(u => u.pendente) ? `<span class="nbadge">${D().users.filter(u => u.pendente).length}</span>` : ''}</a>`).join('');
+  $('#nav').innerHTML = navHtml();
   $$('#nav a').forEach(a => a.onclick = () => go(a.dataset.r));
+  $$('#nav [data-g]').forEach(h => h.onclick = () => { const g = h.dataset.g; const ab = navAbertos(); ab.has(g) ? ab.delete(g) : ab.add(g); try { localStorage.setItem('praes_nav', JSON.stringify([...ab])); } catch (e) { } h.parentElement.classList.toggle('open', ab.has(g)); h.setAttribute('aria-expanded', ab.has(g)); });
   const bn = [['painel', '◧', 'Painel'], ['vendas', '▤', 'Vendas'], ['agenda', '◷', 'Agenda'], ['funil', '⫶', 'Funil']];
   $('#bnav').innerHTML = bn.map(([id, ic, l]) => `<a data-b="${id}" class="${route === id ? 'on' : ''}"><span class="i">${ic}</span>${l}</a>`).join('') + `<a data-b="menu" class="${bn.some(x => x[0] === route) ? '' : 'on'}"><span class="i">☰</span>Mais</a>`;
   $$('#bnav a').forEach(a => a.onclick = () => a.dataset.b === 'menu' ? $('#side').classList.toggle('open') : go(a.dataset.b));
@@ -1740,7 +1759,7 @@ store.onAuth((ok) => {
 });
 document.title = `${EMPRESA} · Controle de Vendas`;
 // ---------- atualização automática: se saiu versão nova, recarrega ----------
-const APP_V = 13;
+const APP_V = 14;
 const APP_DATA = '09/11/2026';
 const DEV = { nome: 'Gustavo Soares', email: 'gstsoares27@gmail.com', zap: '(11) 95448-5216', zapLink: 'https://wa.me/5511954485216' };
 function rodape(versaoServidor) {
