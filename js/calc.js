@@ -41,6 +41,7 @@ export const FORMAS = [
   { key: 'ato',     label: 'Ato + parcelas mensais' },
   { key: 'repasse', label: 'Repasse Caixa/banco' },
   { key: 'atorep',  label: 'Ato + repasse Caixa/banco' },
+  { key: 'fluxo',   label: 'Conforme fluxo do comprador' },
 ];
 export const SERIES = ['Ato', 'Mensal', 'Repasse', 'Outro'];
 export const PRAZO_REPASSE_DIAS = 45;

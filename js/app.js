@@ -1,9 +1,9 @@
 import {
   CARGOS, STATUS, STATUS_VENDA, GRUPOS_FUNIL, FORMAS, statusInfo, slug, isVenda, dataRef, titular, comissoes,
-  pendencias, periodo, noPeriodo, iso, addDays, toDate, parcelasDaVenda, gerarParcelas, round2, PRAZO_REPASSE_DIAS,
+  pendencias, periodo, noPeriodo, iso, addDays, addMonths, toDate, parcelasDaVenda, gerarParcelas, round2, PRAZO_REPASSE_DIAS,
   participantesDaVenda, taxaDaVenda, cargoLabel, SERIES, IMPOSTO_PADRAO, pagamentosDaVenda
-} from './calc.js?v=14';
-import { store, init, login, logout, save, saveMany, remove, createUser, updateUser, changePassword, resetDemo, resetSenha, limparColecoes, liberarUsuario } from './store.js?v=14';
+} from './calc.js?v=15';
+import { store, init, login, logout, save, saveMany, remove, createUser, updateUser, changePassword, resetDemo, resetSenha, limparColecoes, liberarUsuario } from './store.js?v=15';
 import { EMPRESA } from './firebase-config.js';
 
 // ============================ HELPERS ============================
@@ -493,11 +493,33 @@ function vVendas(el) {
 }
 
 // ---------- modal de venda ----------
+// lê a planilha de condições/fluxo do comprador (modelo da incorporadora): colunas Série, Valor, Valor total da comissão, Vencimento
+async function lerFluxoArquivo(arq) {
+  let rows;
+  if (/\.(xlsx|xls)$/i.test(arq.name)) {
+    const wb = XLSX.read(await arq.arrayBuffer(), { cellDates: true });
+    rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: '' });
+  } else {
+    const buf = await arq.arrayBuffer(); let txt = new TextDecoder('utf-8').decode(buf);
+    if (txt.includes('\uFFFD')) txt = new TextDecoder('windows-1252').decode(buf);
+    txt = txt.replace(/^\uFEFF/, ''); const sep = (txt.split('\n')[0].match(/;/g) || []).length >= (txt.split('\n')[0].match(/,/g) || []).length ? ';' : ',';
+    rows = txt.split(/\r?\n/).map(l => { const out = []; let cur = '', q = false; for (const ch of l) { if (ch === '"') q = !q; else if (ch === sep && !q) { out.push(cur); cur = ''; } else cur += ch; } out.push(cur); return out.map(x => x.trim()); });
+  }
+  const norm = (x) => String(x ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+  const hi = rows.findIndex(r => r.some(c => norm(c) === 'serie') && r.some(c => norm(c) === 'valor'));
+  if (hi < 0) throw new Error('cabeçalho com "Série" e "Valor" não encontrado');
+  const h = rows[hi].map(norm);
+  const cS = h.indexOf('serie'), cV = h.indexOf('valor'), cC = h.findIndex(x => x.startsWith('valor total da comissao') || x === 'comissao'), cD = h.findIndex(x => x.startsWith('vencimento'));
+  const num = (x) => typeof x === 'number' ? x : (parseNum(String(x).replace(/[^\d,.\-]/g, '')) || 0);
+  const data = (x) => { if (x instanceof Date && !isNaN(x)) return new Date(x.getTime() - x.getTimezoneOffset() * 60000).toISOString().slice(0, 10); const m = String(x || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/); if (m) return `${m[3].length === 2 ? '20' + m[3] : m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`; const n = String(x || '').match(/^(\d{4})-(\d{2})-(\d{2})/); return n ? n[0] : ''; };
+  return rows.slice(hi + 1).filter(r => String(r[cS] ?? '').trim()).map(r => ({ serie: String(r[cS]).trim(), valor: round2(num(r[cV])), comissao: cC >= 0 ? round2(num(r[cC])) : 0, vencimento: cD >= 0 ? data(r[cD]) : '' }));
+}
+
 function abrirVenda(v0, preset = {}) {
   const novo = !v0;
   const v = v0 ? JSON.parse(JSON.stringify(v0)) : { data: hoje(), status: 'NOVA PASTA', dataStatus: hoje(), torre: 'ÚNICA', corpo: {}, parcelas: [], participantes: [], ...preset };
   if (novo && store.me.papel === 'corretor' && !v.corretor) { v.corretor = myP(); const p = pessoaPorNome(v.corretor); v.gerente = p?.gerente || ''; v.diretor = p?.diretor || ''; }
-  v.corpo = v.corpo || {}; v.parcelas = (v.parcelas || []).map((p, i) => ({ ...p, id: p.id || 'x' + i })); v.pagamentos = v.pagamentos || {};
+  v.corpo = v.corpo || {}; v.parcelas = (v.parcelas || []).map((p, i) => ({ ...p, id: p.id || 'x' + i })); v.pagamentos = v.pagamentos || {}; v.fluxo = (v.fluxo || []).map((p, i) => ({ ...p, id: p.id || 'f' + i }));
   // corpo de vendas editável: se a venda ainda não tem, nasce da regra do quadro de taxas
   if (!v.participantes || !v.participantes.length) { v.participantes = participantesDaVenda(v, D().regras).map(l => ({ id: l.id, cargo: l.cargo, label: l.label, pessoa: l.pessoa, pct: l.pct })); if (v.participantes.length && !v.taxa) v.taxa = taxaDaVenda(v, D().regras); }
   const adm = store.isAdmin(); const ed = podeEditar(); const mst = store.isMaster();
@@ -520,6 +542,7 @@ function abrirVenda(v0, preset = {}) {
       <label class="s2">Observação<textarea class="in" data-v="obs" rows="1" ${ed ? '' : 'disabled'}>${esc(v.obs || '')}</textarea></label>
     </div>
     <div class="card mt" style="box-shadow:none" id="corpoBox"></div>
+    <details class="card mt fluxo" style="box-shadow:none" id="fxDet" ${v.fluxo.length ? 'open' : ''}><summary><b>Fluxo de pagamento do comprador</b> <span class="muted small">(opcional)</span> <span class="muted small" id="fxSum"></span></summary><div id="fxBody" class="mt"></div></details>
     <div class="mt" id="parcBox"></div>
     ${!novo && (v.historico || []).length ? `<details class="card mt" style="box-shadow:none"><summary style="cursor:pointer;font-weight:700">Histórico de alterações (${v.historico.length})</summary><div class="hist mt">${v.historico.slice().reverse().map(h => `<div class="h"><div class="q">${esc(new Date(h.em).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }))} · <b>${esc(h.por || '—')}</b></div><ul>${(h.alt || []).map(x => Array.isArray(x) ? { c: x[0], de: x[1], para: x[2] } : x).map(({ c, de, para: pa }) => `<li><b>${esc(c)}</b>: ${de ? `<span class="de">${esc(de)}</span> → ` : ''}<span class="para">${esc(pa || '(vazio)')}</span></li>`).join('')}</ul></div>`).join('')}</div></details>` : ''}
   </div>
@@ -563,7 +586,7 @@ function abrirVenda(v0, preset = {}) {
       v.participantes = CARGOS.filter(c => Number(r.cargos?.[c.key]) > 0).map(c => ({ id: nid(), cargo: c.key, label: c.label, pessoa: titular(o, c.key), pct: Number(r.cargos[c.key]) }));
       corpo(); parcelas();
     };
-    $('#cTaxa', b).onchange = (e) => { v.taxa = parseNum(e.target.value) || 0; corpo(); parcelas(); };
+    $('#cTaxa', b).onchange = (e) => { v.taxa = parseNum(e.target.value) || 0; corpo(); fluxo(); parcelas(); };
     $('#cAdd', b).onclick = () => { v.participantes.push({ id: nid(), cargo: 'corretor', label: 'Corretor', pessoa: '', pct: 0 }); corpo(); };
     $$('[data-prm]', b).forEach(x => x.onclick = () => { v.participantes.splice(+x.dataset.prm, 1); corpo(); });
     $$('[data-pp]', b).forEach(x => x.onchange = () => {
@@ -576,6 +599,52 @@ function abrirVenda(v0, preset = {}) {
     });
   }
 
+  // ---------- FLUXO DE PAGAMENTO DO COMPRADOR (opcional) ----------
+  function fluxo() {
+    const fx = v.fluxo; const o = ler(); const vgv = Number(o.vgv) || 0;
+    const tv = fx.reduce((a, p) => a + (Number(p.valor) || 0), 0), tc = fx.reduce((a, p) => a + (Number(p.comissao) || 0), 0);
+    const totCom = vgv * (Number(v.taxa) || 0) / 100; const dis = ed ? '' : 'disabled';
+    $('#fxSum', b).textContent = fx.length ? `· ${fx.length} linha(s) · ${brl(tv)} · comissão no fluxo ${brl(tc)}` : '· não preenchido';
+    $('#fxBody', b).innerHTML = `<p class="muted small" style="margin-top:0">Como o comprador vai pagar a unidade (ato, mensais, financiamento, bônus…) e quanto de comissão está em cada parcela. Pode importar a planilha de condições da incorporadora (.csv ou .xlsx) ou lançar à mão.</p>
+      ${ed ? `<div class="row" style="margin-bottom:10px"><label class="btn sm gold" style="cursor:pointer">⇪ Importar planilha<input type="file" id="fxArq" accept=".csv,.txt,.xlsx,.xls" hidden></label><button class="btn sm" id="fxAdd" type="button">+ Linha</button>${fx.length ? '<button class="btn sm danger" id="fxLimpa" type="button">Limpar fluxo</button>' : ''}<span class="space"></span>${adm && tc > 0 ? '<button class="btn sm" id="fxParc" type="button" title="Cria a condição de recebimento da comissão com as parcelas que têm comissão no fluxo">Usar como condição de recebimento da comissão ↓</button>' : ''}</div>` : ''}
+      ${fx.length ? `<div class="tbl-wrap"><table class="fx-tb"><thead><tr><th>#</th><th>Série</th><th class="n">Valor</th><th class="n">Comissão na parcela</th><th>Vencimento</th><th></th></tr></thead><tbody>
+      ${fx.map((p, i) => `<tr class="${Number(p.comissao) > 0 ? 'com' : ''}"><td class="muted">${i + 1}</td><td><input class="in" list="dl-fxs" data-fx="${i}" data-k="serie" value="${esc(p.serie || '')}" ${dis}></td>
+        <td class="n"><input class="in right" style="width:130px" data-fx="${i}" data-k="valor" value="${p.valor != null ? String(p.valor).replace('.', ',') : ''}" ${dis}></td>
+        <td class="n"><input class="in right" style="width:120px" data-fx="${i}" data-k="comissao" value="${p.comissao ? String(p.comissao).replace('.', ',') : ''}" placeholder="0,00" ${dis}></td>
+        <td><input type="date" class="in" data-fx="${i}" data-k="vencimento" value="${p.vencimento || ''}" ${dis}>${p.vencimento ? '' : '<span class="muted small"> sem data</span>'}</td>
+        <td>${ed ? `<button class="btn sm danger" data-fxrm="${i}" type="button">×</button>` : ''}</td></tr>`).join('')}
+      </tbody><tfoot><tr><td colspan="2">Total do fluxo</td><td class="n">${brl(tv)}</td><td class="n">${brl(tc)}</td><td colspan="2">${vgv ? (Math.abs(tv - vgv) > 0.05 ? `<span class="tag bad">diferença de ${brl(vgv - tv)} para o VGV (${brl(vgv)})</span>` : '<span class="tag ok">fecha com o VGV</span>') : ''} ${tc && totCom ? (Math.abs(tc - totCom) > 0.05 ? `<span class="tag warn">comissão no fluxo ≠ total da comissão (${brl(totCom)})</span>` : '<span class="tag ok">comissão fecha</span>') : ''}</td></tr></tfoot></table></div>
+      <datalist id="dl-fxs">${['Ato', 'Sinal', 'Parcelas Mensais', 'Intermediária', 'Anual', 'Chaves', 'Financiamento', 'Parcela Bonus', 'FGTS', 'Subsídio'].map(x => `<option value="${x}">`).join('')}</datalist>`
+        : '<div class="muted small">Nenhuma linha. O fluxo é opcional: a venda salva normalmente sem ele.</div>'}`;
+    if (!ed) return;
+    $('#fxAdd', b).onclick = () => { const ult = fx[fx.length - 1]; v.fluxo.push({ id: nid(), serie: ult?.serie || 'Parcelas Mensais', valor: ult?.valor || 0, comissao: 0, vencimento: ult?.vencimento ? addMonths(ult.vencimento, 1) : '' }); fluxo(); };
+    $('#fxLimpa', b) && ($('#fxLimpa', b).onclick = async () => { if (!(await confirmar('Apagar todas as linhas do fluxo do comprador desta venda? (só vale depois de salvar a venda)'))) return; v.fluxo = []; fluxo(); });
+    $$('[data-fxrm]', b).forEach(x => x.onclick = () => { v.fluxo.splice(+x.dataset.fxrm, 1); fluxo(); });
+    $$('[data-fx]', b).forEach(x => x.onchange = () => { const p = v.fluxo[+x.dataset.fx], k = x.dataset.k; p[k] = ['valor', 'comissao'].includes(k) ? (parseNum(x.value) || 0) : x.value.trim(); fluxo(); });
+    $('#fxArq', b).onchange = async (e) => {
+      const arq = e.target.files[0]; e.target.value = ''; if (!arq) return;
+      try {
+        const linhas = await lerFluxoArquivo(arq);
+        if (!linhas.length) return toast('Não encontrei linhas de fluxo nessa planilha (precisa das colunas Série, Valor e Vencimento)');
+        if (v.fluxo.length && !(await confirmar(`Substituir as ${v.fluxo.length} linha(s) atuais pelas ${linhas.length} da planilha?`))) return;
+        v.fluxo = linhas.map(l => ({ id: nid(), ...l }));
+        const tv2 = v.fluxo.reduce((a, p) => a + p.valor, 0);
+        if (!(Number(ler().vgv) > 0) && tv2 > 0 && sel('vgv')) { sel('vgv').value = String(round2(tv2)).replace('.', ','); corpo(); parcelas(); }
+        $('#fxDet', b).open = true; fluxo(); toast(`${linhas.length} linha(s) importada(s) de ${arq.name}`);
+      } catch (err) { console.error(err); toast('Não consegui ler o arquivo: ' + (err.message || err)); }
+    };
+    $('#fxParc', b) && ($('#fxParc', b).onclick = () => parcelasDoFluxo());
+  }
+  async function parcelasDoFluxo() {
+    const com = v.fluxo.filter(p => Number(p.comissao) > 0);
+    if (!com.length) { toast('O fluxo do comprador não tem parcelas com comissão. Preencha ou importe o fluxo primeiro.'); $('#fxDet', b).open = true; return; }
+    if (v.parcelas.length && !(await confirmar(`Substituir as ${v.parcelas.length} parcela(s) da condição de recebimento pelas ${com.length} parcela(s) com comissão do fluxo?${v.parcelas.some(p => p.recebido) ? ' Atenção: há parcelas já marcadas como recebidas.' : ''}`))) return;
+    const serieDe = (t) => /^ato|sinal/i.test(t) ? 'Ato' : /mensa/i.test(t) ? 'Mensal' : /repasse|financ/i.test(t) ? 'Repasse' : 'Outro';
+    v.formaPagamento = 'fluxo';
+    v.parcelas = com.map((p, i) => ({ id: nid(), serie: serieDe(p.serie || ''), descricao: `Fluxo do comprador · ${p.serie || 'parcela'} (${i + 1}/${com.length})`, valor: round2(p.comissao), vencimento: p.vencimento || '', recebido: false, dataRecebimento: '' }));
+    parcelas(); toast(`${com.length} parcela(s) de comissão criadas a partir do fluxo do comprador`);
+  }
+
   // ---------- CONDIÇÃO DE RECEBIMENTO ----------
   function parcelas() {
     const o = ler(); const ps = v.parcelas;
@@ -586,7 +655,7 @@ function abrirVenda(v0, preset = {}) {
     $('#parcBox', b).innerHTML = `<div class="card" style="box-shadow:none"><h3>Condição de recebimento da comissão <small>· incorporadora → imobiliária</small></h3>
       ${adm ? `<div class="form f6" style="margin-bottom:10px">
         <label class="s2">Condição<select class="in" id="gForma">${FORMAS.map(f => `<option value="${f.key}" ${f.key === F ? 'selected' : ''}>${f.label}</option>`).join('')}</select></label>
-        <label>Data do ato / 1º receb.<input type="date" class="in" id="gData" value="${o.dataVenda || hoje()}"></label>
+        <label data-g="dt">Data do ato / 1º receb.<input type="date" class="in" id="gData" value="${o.dataVenda || hoje()}"></label>
         <label data-g="ato">Valor do ato (R$)<input class="in" id="gAtoV" placeholder="0,00"></label>
         <label data-g="mensal">Nº parcelas mensais<input class="in" id="gQtd" value="3"></label>
         <label data-g="mensal">1ª mensal em<input type="date" class="in" id="gPrim"></label>
@@ -602,11 +671,12 @@ function abrirVenda(v0, preset = {}) {
       <p class="muted small">Cada parcela marcada como <b>recebida</b> gera os pagamentos de cada participante (pela referência) na tela Pagamentos, no mês do recebimento.</p>`
         : `<div class="muted small">Sem parcelas lançadas. ${total ? `Escolha a condição e clique em "Gerar parcelas". Sem parcelas, o sistema usa a previsão automática de ${brl(total)} em ${fd(addDays(dataRef(o) || hoje(), PRAZO_REPASSE_DIAS))}.` : 'Informe o VGV e a taxa para calcular.'}</div>`}</div>`;
     if (!adm) return;
-    const syncG = () => { const f = $('#gForma', b).value; $$('[data-g="ato"]', b).forEach(x => x.classList.toggle('hidden', !['ato', 'atorep'].includes(f))); $$('[data-g="mensal"]', b).forEach(x => x.classList.toggle('hidden', f !== 'ato')); $$('[data-g="rep"]', b).forEach(x => x.classList.toggle('hidden', !['repasse', 'atorep'].includes(f))); };
+    const syncG = () => { const f = $('#gForma', b).value; $$('[data-g="ato"]', b).forEach(x => x.classList.toggle('hidden', !['ato', 'atorep'].includes(f))); $$('[data-g="mensal"]', b).forEach(x => x.classList.toggle('hidden', f !== 'ato')); $$('[data-g="rep"]', b).forEach(x => x.classList.toggle('hidden', !['repasse', 'atorep'].includes(f))); $$('[data-g="dt"]', b).forEach(x => x.classList.toggle('hidden', f === 'fluxo')); };
     $('#gForma', b).onchange = () => { v.formaPagamento = $('#gForma', b).value; syncG(); }; syncG();
     $('#gGerar', b).onclick = async () => {
       if (v.parcelas.some(p => p.recebido) && !(await confirmar('Já existem parcelas marcadas como recebidas. Gerar de novo substitui todas as parcelas. Continuar?'))) return;
       const f = $('#gForma', b).value; v.formaPagamento = f;
+      if (f === 'fluxo') return parcelasDoFluxo();
       v.parcelas = gerarParcelas(ler(), D().regras, { forma: f, valorAto: parseNum($('#gAtoV', b).value), qtd: $('#gQtd', b).value, primeira: $('#gPrim', b).value || '', dias: $('#gDias', b).value, dataAto: $('#gData', b).value });
       parcelas();
     };
@@ -628,13 +698,14 @@ function abrirVenda(v0, preset = {}) {
   sel('diretor')?.addEventListener('change', () => preencheTitular('dirVendas', sel('diretor').value));
   sel('empreendimento')?.addEventListener('change', () => { const e = D().empreendimentos.find(x => up(x.nome) === up(sel('empreendimento').value)); if (e) { if (!sel('incorporadora').value) sel('incorporadora').value = e.incorporadora || ''; if (e.regraPadrao && !v.regra) { v.regra = e.regraPadrao; corpo(); } } });
   sel('status')?.addEventListener('change', () => { sel('dataStatus').value = hoje(); if (STATUS_VENDA.includes(sel('status').value) && !sel('dataVenda').value) sel('dataVenda').value = hoje(); });
-  sel('vgv')?.addEventListener('change', () => { corpo(); parcelas(); });
-  corpo(); parcelas();
+  sel('vgv')?.addEventListener('change', () => { corpo(); fluxo(); parcelas(); });
+  corpo(); fluxo(); parcelas();
 
   $('#bSave', b) && ($('#bSave', b).onclick = async () => {
     const o = ler();
     o.participantes = v.participantes.filter(p => p.pessoa || Number(p.pct)).map(p => ({ id: p.id || nid(), cargo: p.cargo, label: p.label || cargoLabel(p.cargo), pessoa: up(p.pessoa), pct: Number(p.pct) || 0 }));
     o.parcelas = v.parcelas.map(p => ({ id: p.id || nid(), serie: p.serie || 'Outro', descricao: p.descricao || '', valor: round2(p.valor), vencimento: p.vencimento || '', recebido: !!p.recebido, dataRecebimento: p.dataRecebimento || '' }));
+    o.fluxo = v.fluxo.filter(p => p.serie || Number(p.valor)).map(p => ({ id: p.id || nid(), serie: p.serie || '', valor: round2(p.valor || 0), comissao: round2(p.comissao || 0), vencimento: p.vencimento || '' }));
     if (!o.empreendimento) return toast('Informe o empreendimento');
     if (!empOk({ empreendimento: o.empreendimento })) return toast('Você não tem acesso a este empreendimento');
     if (o.participantes.length) { const soma = o.participantes.reduce((a, p) => a + p.pct, 0); if (Math.abs(soma - (Number(o.taxa) || 0)) > 1e-6 && !(await confirmar(`O corpo de vendas soma ${pctf(soma)} e a taxa da venda é ${pctf(o.taxa || 0)}. Salvar mesmo assim? (a venda fica com pendência)`))) return; }
@@ -651,7 +722,7 @@ function abrirVenda(v0, preset = {}) {
     } catch (e) { console.error(e); toast('Erro ao salvar: ' + (e.message || e)); }
   });
   $('#bDel', b) && ($('#bDel', b).onclick = async () => { if (!(await confirmar('Excluir este registro definitivamente?'))) return; await remove('vendas', v.id); closeModal(); toast('Excluído'); });
-  $('#bDup', b) && ($('#bDup', b).onclick = () => { const o = ler(); delete o.id; o.unidade = ''; o.cliente = ''; o.cadastro = ''; o.parcelas = []; o.pagamentos = {}; o.participantes = o.participantes.map(p => ({ ...p, id: nid() })); closeModal(); abrirVenda(null, o); });
+  $('#bDup', b) && ($('#bDup', b).onclick = () => { const o = ler(); delete o.id; o.unidade = ''; o.cliente = ''; o.cadastro = ''; o.parcelas = []; o.fluxo = []; o.pagamentos = {}; o.participantes = o.participantes.map(p => ({ ...p, id: nid() })); closeModal(); abrirVenda(null, o); });
   $('#bDemo', b) && ($('#bDemo', b).onclick = () => { const o = ler(); o.parcelas = v.parcelas; demonstrativoPDF(o); });
 }
 
@@ -1759,8 +1830,8 @@ store.onAuth((ok) => {
 });
 document.title = `${EMPRESA} · Controle de Vendas`;
 // ---------- atualização automática: se saiu versão nova, recarrega ----------
-const APP_V = 14;
-const APP_DATA = '09/11/2026';
+const APP_V = 15;
+const APP_DATA = '22/11/2026';
 const DEV = { nome: 'Gustavo Soares', email: 'gstsoares27@gmail.com', zap: '(11) 95448-5216', zapLink: 'https://wa.me/5511954485216' };
 function rodape(versaoServidor) {
   const nova = versaoServidor && Number(versaoServidor) > APP_V;

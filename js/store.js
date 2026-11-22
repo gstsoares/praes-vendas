@@ -1,6 +1,6 @@
 // Camada de dados: Firebase (Auth + Firestore) ou MODO DEMONSTRAÇÃO (localStorage).
 import { firebaseConfig } from './firebase-config.js';
-import { acessoDaVenda, slug } from './calc.js?v=14';
+import { acessoDaVenda, slug } from './calc.js?v=15';
 
 const FB = 'https://www.gstatic.com/firebasejs/10.12.2/';
 export const COLS = ['vendas', 'pessoas', 'regras', 'empreendimentos', 'agendamentos', 'users', 'config', 'roleta'];
@@ -214,6 +214,7 @@ const HIST_CAMPOS = [['status', 'Status'], ['dataStatus', 'Data do status'], ['v
 const fmtR = (x) => (Number(x) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const resumoCorpo = (l) => (l || []).filter(p => p.pessoa || Number(p.pct)).map(p => `${p.pessoa || p.label || '?'} ${String(Number(p.pct) || 0).replace('.', ',')}%`).join('; ');
 const resumoParc = (l) => { l = l || []; if (!l.length) return ''; const t = l.reduce((a, p) => a + (Number(p.valor) || 0), 0); const r = l.filter(p => p.recebido).length; return `${l.length} parcela(s) · ${fmtR(t)} · ${r} recebida(s)`; };
+const resumoFluxo = (l) => { l = l || []; if (!l.length) return ''; const t = l.reduce((a, p) => a + (Number(p.valor) || 0), 0), c = l.reduce((a, p) => a + (Number(p.comissao) || 0), 0); return `${l.length} linha(s) · ${fmtR(t)} · comissão ${fmtR(c)}`; };
 const resumoPag = (m) => { const v = Object.values(m || {}); return v.length ? `${v.filter(x => x && x.pago).length} pagamento(s) marcado(s) como pago` : ''; };
 function historicoVenda(obj) {
   const old = obj.id ? store.data.vendas.find(x => x.id === obj.id) : null;
@@ -223,7 +224,7 @@ function historicoVenda(obj) {
   else {
     const val = (k, x) => k === 'vgv' ? (x == null || x === '' ? '' : fmtR(x)) : String(x ?? '').trim();
     HIST_CAMPOS.forEach(([k, l]) => { const a = val(k, old[k]), b = val(k, obj[k]); if (a !== b) alt.push({ c: l, de: k === 'obs' ? (a ? '(texto anterior)' : '') : a, para: k === 'obs' ? (b ? '(texto alterado)' : '') : b }); });
-    [['Corpo de vendas (comissões)', resumoCorpo], ['Parcelas de recebimento', resumoParc, 'parcelas'], ['Pagamentos', resumoPag, 'pagamentos']].forEach(([l, f, k]) => { const a = f(old[k || 'participantes']), b = f(obj[k || 'participantes']); if (a !== b) alt.push({ c: l, de: a, para: b }); });
+    [['Corpo de vendas (comissões)', resumoCorpo], ['Parcelas de recebimento', resumoParc, 'parcelas'], ['Fluxo do comprador', resumoFluxo, 'fluxo'], ['Pagamentos', resumoPag, 'pagamentos']].forEach(([l, f, k]) => { const a = f(old[k || 'participantes']), b = f(obj[k || 'participantes']); if (a !== b) alt.push({ c: l, de: a, para: b }); });
   }
   if (!alt.length) return base;
   return [...base, { em: new Date().toISOString(), por: store.me?.nome || store.me?.email || '', alt }].slice(-80);
