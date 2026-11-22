@@ -390,3 +390,9 @@ nav .grp.open>.grp-h{color:#fff}
 nav .grp-b{display:none;border-left:1px solid #2e2d33;margin-left:21px;padding-left:4px}
 nav .grp.open>.grp-b{display:block}
 nav .grp-b a.sub{padding-left:12px}
+/* fluxo de pagamento do comprador */
+details.fluxo>summary{cursor:pointer;list-style:none;display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+details.fluxo>summary::before{content:'▸';color:var(--gold);transition:transform .2s}
+details.fluxo[open]>summary::before{transform:rotate(90deg)}
+.fx-tb tr.com td{background:rgba(201,162,74,.08)}
+.fx-tb .in{min-width:0}
